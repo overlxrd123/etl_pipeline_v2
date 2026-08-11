@@ -1,0 +1,30 @@
+# Core
+pandas>=2.0
+numpy>=1.24
+SQLAlchemy>=2.0
+pydantic>=2.0
+
+# Extraction
+requests>=2.31
+httpx>=0.25
+tenacity>=8.2
+
+# dbt
+dbt-core>=1.7
+dbt-sqlite>=1.4
+
+# Orchestration
+prefect>=2.14
+
+# Dashboard
+streamlit>=1.28
+plotly>=5.17
+
+# Testing
+pytest>=7.4
+pytest-cov>=4.1
+
+# Utilities
+python-dotenv>=1.0
+loguru>=0.7
+tqdm>=4.66

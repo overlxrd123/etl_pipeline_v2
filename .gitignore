@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+venv/
+.env
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+dbt_project/logs/
+dbt_project/target/
+.streamlit/
+logs/

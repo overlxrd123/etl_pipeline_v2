@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: mart_sales_daily
+    description: "每日销售KPI看板 — 业务核心表，含环比和7日移动平均"
+    columns:
+      - name: date_id
+        tests:
+          - not_null
+      - name: total_revenue
+        description: "当日总营收"
+      - name: order_count
+        description: "当日订单数"
+      - name: avg_order_value
+        description: "平均订单金额"
+
+  - name: mart_product_performance
+    description: "产品维度分析 — 营收排名、品类占比、利润率"
+    columns:
+      - name: product_id
+        tests:
+          - unique
+          - not_null
+      - name: revenue_rank
+        description: "营收排名（1=最高）"
+
+  - name: mart_customer_segments
+    description: "RFM客户分层 — Champions/Loyal/Potential/At Risk/Lost"
+    columns:
+      - name: customer_id
+        tests:
+          - unique
+          - not_null
+      - name: segment
+        description: "客户分层标签"
+
+  - name: mart_weather_impact
+    description: "天气对销售影响 — 不同天气条件下的营收对比"
+    columns:
+      - name: weather_category
+        tests:
+          - not_null
