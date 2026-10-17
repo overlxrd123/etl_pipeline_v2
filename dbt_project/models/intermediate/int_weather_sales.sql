@@ -22,6 +22,6 @@ SELECT
     w.is_extreme
 
 FROM {{ ref('int_daily_sales') }} s
-LEFT JOIN dim_weather w
+LEFT JOIN {{ ref('stg_weather') }} w
     ON s.city_id = w.city_id
     AND s.date_id = w.date_id

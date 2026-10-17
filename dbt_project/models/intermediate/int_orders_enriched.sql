@@ -44,9 +44,7 @@ SELECT
     o.crypto_rate_usd,
     o.order_timestamp
 
-FROM fact_orders o
-JOIN dim_customer c   ON o.customer_id = c.customer_id
-JOIN dim_product p    ON o.product_id  = p.product_id
-JOIN dim_date d       ON o.date_id     = d.date_id
-WHERE o.order_status = 'completed'
-  AND o.net_amount > 0
+FROM {{ ref('stg_orders') }} o
+JOIN {{ ref('stg_customers') }} c ON o.customer_id = c.customer_id
+JOIN {{ ref('stg_products') }} p  ON o.product_id  = p.product_id
+JOIN dim_date d                   ON o.date_id     = d.date_id
