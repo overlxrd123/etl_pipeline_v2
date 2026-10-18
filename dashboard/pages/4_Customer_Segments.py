@@ -68,5 +68,5 @@ else:
                  template="plotly_dark", barmode="stack",
                  color_discrete_sequence=["#06d6a0", "#118ab2", "#ffd166", "#ef476f", "#7b2ff7", "#64748b"])
     fig.update_layout(paper_bgcolor="#0d1520", plot_bgcolor="#0d1520",
-                      font_color="#cbd5e1", height=400)
+                      font_color="#f8fafc", height=400)
     st.plotly_chart(fig, width='stretch')

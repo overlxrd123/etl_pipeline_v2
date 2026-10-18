@@ -26,11 +26,17 @@ st.markdown("""
         margin-bottom: 0;
     }
     .sub-header {
-        color: #64748b;
+        color: #cbd5e1;
         font-size: 1em;
         margin-bottom: 20px;
     }
-    .stMetric { background: #111827; padding: 16px; border-radius: 12px; border: 1px solid #1e293b; }
+    .stMetric {
+        background: #111827;
+        color: #f8fafc;
+        padding: 16px;
+        border-radius: 12px;
+        border: 1px solid #1e293b;
+    }
 </style>
 """, unsafe_allow_html=True)
 

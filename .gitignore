@@ -16,5 +16,6 @@ data/processed/*
 pbi_demo/
 dbt_project/logs/
 dbt_project/target/
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 logs/

@@ -15,13 +15,13 @@ def kpi_tile(label: str, value: str, delta: str = None):
         mode="number+delta" if delta else "number",
         value=float(value.replace("$", "").replace(",", "").replace("K", "000").replace("M", "000000"))
             if isinstance(value, str) else value,
-        title={"text": label, "font": {"size": 14, "color": "#94a3b8"}},
+        title={"text": label, "font": {"size": 14, "color": "#cbd5e1"}},
         number={"font": {"size": 36, "color": "#06d6a0"},
                 "prefix": "$" if label.lower() in ["total revenue", "avg order value", "总营收", "客单价"] else ""},
         delta={"reference": float(delta)} if delta else None,
     ))
     fig.update_layout(height=160, margin=dict(l=10, r=10, t=10, b=10),
-                      paper_bgcolor="#111827", font_color="#cbd5e1")
+                      paper_bgcolor="#111827", font_color="#f8fafc")
     return fig
 
 
@@ -34,7 +34,7 @@ def line_chart(df: pd.DataFrame, x: str, y: str, title: str,
                   color_discrete_sequence=COLORS)
     fig.update_layout(
         paper_bgcolor="#0d1520", plot_bgcolor="#0d1520",
-        font_color="#cbd5e1", title_font_color="#e2e8f0",
+        font_color="#f8fafc", title_font_color="#ffffff",
         height=400, margin=dict(l=10, r=10, t=40, b=10),
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
@@ -51,7 +51,7 @@ def bar_chart(df: pd.DataFrame, x: str, y: str, title: str, horizontal: bool = F
                      template="plotly_dark", color_discrete_sequence=COLORS)
     fig.update_layout(
         paper_bgcolor="#0d1520", plot_bgcolor="#0d1520",
-        font_color="#cbd5e1", title_font_color="#e2e8f0",
+        font_color="#f8fafc", title_font_color="#ffffff",
         height=400, margin=dict(l=10, r=10, t=40, b=10),
     )
     return fig
@@ -62,10 +62,11 @@ def pie_chart(df: pd.DataFrame, names: str, values: str, title: str):
     fig = px.pie(df, names=names, values=values, title=title,
                  template="plotly_dark", color_discrete_sequence=COLORS,
                  hole=0.35)
-    fig.update_traces(textinfo='percent+label', textfont_size=11)
+    fig.update_traces(textinfo='percent+label', textfont_size=11,
+                      textfont_color="#f8fafc")
     fig.update_layout(
-        paper_bgcolor="#0d1520", font_color="#cbd5e1",
-        title_font_color="#e2e8f0", height=400,
+        paper_bgcolor="#0d1520", font_color="#f8fafc",
+        title_font_color="#ffffff", height=400,
         margin=dict(l=10, r=10, t=40, b=10),
     )
     return fig
@@ -79,7 +80,7 @@ def scatter_chart(df: pd.DataFrame, x: str, y: str, color: str,
                      color_discrete_sequence=COLORS)
     fig.update_layout(
         paper_bgcolor="#0d1520", plot_bgcolor="#0d1520",
-        font_color="#cbd5e1", title_font_color="#e2e8f0",
+        font_color="#f8fafc", title_font_color="#ffffff",
         height=450, margin=dict(l=10, r=10, t=40, b=10),
     )
     return fig
@@ -91,7 +92,7 @@ def metric_row(values: list[dict]):
     for v in values:
         cols.append(go.Indicator(
             mode="number",
-            title={"text": v["label"], "font": {"size": 12, "color": "#64748b"}},
+            title={"text": v["label"], "font": {"size": 12, "color": "#cbd5e1"}},
             number={"font": {"size": 28, "color": "#06d6a0"}, "prefix": v.get("prefix", ""),
                     "valueformat": v.get("format", ",.0f")},
             value=v["value"],
@@ -100,6 +101,6 @@ def metric_row(values: list[dict]):
     fig.update_layout(
         grid={"rows": 1, "columns": len(values)},
         height=120, margin=dict(l=10, r=10, t=10, b=10),
-        paper_bgcolor="#0d1520", font_color="#cbd5e1",
+        paper_bgcolor="#0d1520", font_color="#f8fafc",
     )
     return fig
