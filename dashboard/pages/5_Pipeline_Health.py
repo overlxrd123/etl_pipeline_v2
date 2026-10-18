@@ -25,7 +25,7 @@ stats = get_pipeline_stats()
 cols = st.columns(len(stats))
 for i, row in stats.iterrows():
     with cols[i]:
-        st.metric(row["table_name"], f"{row['row_count']:,}")
+        st.metric(row["表名"], f"{row['行数']:,}")
 
 st.divider()
 
@@ -126,9 +126,9 @@ with engine.connect() as conn:
         st.metric("最新加密价格采集", str(latest_crypto)[:19])
 
 st.info("""
-**管道 SLA：**
-- 天气数据：每日 06:00 UTC 自动采集
-- 加密价格：每 5 分钟自动采集
-- 订单数据：每日 00:00 UTC 自动生成
-- dbt 转换：每次管道运行后执行
+**数据刷新方式（当前为手动触发，未配置定时任务）：**
+- 天气：`python -m orchestration.flows.ingest_weather`（最近 7 天）
+- 币价：`python -m orchestration.flows.ingest_crypto`（当前现货价）
+- 历史演示数据：`python rebuild_demo_data.py`（365 天窗口）
+- dbt 转换：`cd dbt_project && dbt run --profiles-dir .`
 """)

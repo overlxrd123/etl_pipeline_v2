@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from prefect import flow, task
 
-from src.extract.transaction_generator import generate_products, generate_customers, generate_orders
+from src.extract.transaction_generator import (
+    generate_products, generate_customers, generate_orders, load_drivers_from_db,
+)
 from src.load.raw_to_staging import load_products, load_customers
 from src.load.staging_to_warehouse import load_orders
 
@@ -44,7 +46,12 @@ def task_gen_orders(products_df, customers_df):
     """生成订单"""
     import pandas as pd
     from config.settings import DATA_PROCESSED
-    df = generate_orders(products_df, customers_df)
+
+    # 读取真实天气/币价作为订单生成输入
+    weather_df, crypto_df = load_drivers_from_db()
+    df = generate_orders(products_df, customers_df,
+                         weather_df=weather_df,
+                         crypto_prices_df=crypto_df)
     df.to_csv(DATA_PROCESSED / "orders.csv", index=False)
     print(f"[Orders] 生成 {len(df):,} 条订单")
     return df

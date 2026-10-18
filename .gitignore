@@ -3,6 +3,8 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+*.db.bak*
+dbt_project/.user.yml
 *.sqlite3
 venv/
 .env
@@ -10,6 +12,8 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+# Power BI 演示导出（由数仓生成，体积较大，不入库）
+pbi_demo/
 dbt_project/logs/
 dbt_project/target/
 .streamlit/

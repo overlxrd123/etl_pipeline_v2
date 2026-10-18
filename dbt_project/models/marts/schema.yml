@@ -35,8 +35,23 @@ models:
         description: "客户分层标签"
 
   - name: mart_weather_impact
-    description: "天气对销售影响 — 不同天气条件下的营收对比"
+    description: "天气对销售影响 — 城市×日期粒度对比，含剔除日期/季节波动的订单指数"
     columns:
       - name: weather_category
         tests:
           - not_null
+      - name: orders_index_pct
+        description: "订单指数（100=该城市平常水平），已剔除日期/季节波动"
+        tests:
+          - not_null
+
+  - name: mart_crypto_impact
+    description: "币价对支付行为影响 — BTC 日涨跌幅与加密支付占比"
+    columns:
+      - name: date_id
+        tests:
+          - not_null
+      - name: close_price_usd
+        description: "BTC 当日收盘价（USD）"
+      - name: crypto_order_share_pct
+        description: "加密支付订单占比（%）"

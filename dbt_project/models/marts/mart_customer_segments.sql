@@ -37,27 +37,13 @@ customer_rfm AS (
 
 rfm_scored AS (
     SELECT *,
-        -- R score: 天数越少越好 (1-4, 4=最好)
-        CASE
-            WHEN recency_days <= 30 THEN 4
-            WHEN recency_days <= 90 THEN 3
-            WHEN recency_days <= 180 THEN 2
-            ELSE 1
-        END AS r_score,
-        -- F score: 越多越好
-        CASE
-            WHEN frequency >= 50 THEN 4
-            WHEN frequency >= 20 THEN 3
-            WHEN frequency >= 10 THEN 2
-            ELSE 1
-        END AS f_score,
-        -- M score: 越高越好
-        CASE
-            WHEN monetary >= 10000 THEN 4
-            WHEN monetary >= 3000 THEN 3
-            WHEN monetary >= 1000 THEN 2
-            ELSE 1
-        END AS m_score
+        -- 分位数打分（各占约 25%）：无论数据尺度如何，都能稳定分层
+        -- R: 距上次购买越近越好
+        5 - NTILE(4) OVER (ORDER BY recency_days ASC) AS r_score,
+        -- F: 购买次数越多越好
+        NTILE(4) OVER (ORDER BY frequency ASC)        AS f_score,
+        -- M: 消费金额越高越好
+        NTILE(4) OVER (ORDER BY monetary ASC)         AS m_score
     FROM customer_rfm
 )
 

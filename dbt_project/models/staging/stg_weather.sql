@@ -25,8 +25,11 @@ SELECT
         WHEN w.weather_code BETWEEN 95 AND 99 THEN 'Storm'
         ELSE 'Other'
     END AS weather_category,
-    -- 是否极端天气
-    CASE WHEN w.weather_code >= 65 OR w.weather_code >= 95 THEN 1 ELSE 0 END AS is_extreme
+    -- 是否极端天气（大雨/暴雨/降雪/雷暴）
+    CASE
+        WHEN w.weather_code IN (65, 67, 71, 73, 75, 82, 95, 96, 99) THEN 1
+        ELSE 0
+    END AS is_extreme
 FROM dim_weather w
 JOIN dim_city ci ON w.city_id = ci.city_id
 JOIN dim_date d ON w.date_id = d.date_id

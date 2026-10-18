@@ -12,6 +12,10 @@ from pathlib import Path
 from config.settings import (
     PRODUCT_CATEGORIES, NUM_PRODUCTS, NUM_CUSTOMERS, ORDERS_PER_DAY,
     WEATHER_CITIES, PAYMENT_METHODS, DATA_PROCESSED,
+    WEATHER_RAIN_MM, WEATHER_RAIN_FACTOR, WEATHER_STORM_FACTOR,
+    WEATHER_HEAT_C, WEATHER_HEAT_FACTOR,
+    CRYPTO_RETURN_THRESHOLD, CRYPTO_SHARE_BASE,
+    CRYPTO_SHARE_UP, CRYPTO_SHARE_DOWN,
 )
 
 np.random.seed(42)
@@ -145,105 +149,277 @@ def _weekend_multiplier(d: date) -> float:
     return 1.3 if d.weekday() >= 5 else 1.0
 
 
-def _payment_method():
-    """按概率选择支付方式"""
+def _payment_method(crypto_share: float = CRYPTO_SHARE_BASE):
+    """
+    按概率选择支付方式。
+
+    crypto_share 为加密支付总占比（BTC/ETH 各一半），
+    由当天 BTC 涨跌幅决定。
+    """
     r = np.random.random()
-    if r < 0.70:
+    if r >= crypto_share:
         return "credit_card", None, None
-    elif r < 0.85:
-        return "crypto_btc", "BTC", None   # 汇率稍后从 crypto 数据关联
-    else:
-        return "crypto_eth", "ETH", None
+    if r < crypto_share / 2:
+        return "crypto_btc", "BTC", None
+    return "crypto_eth", "ETH", None
+
+
+def _weather_multiplier(weather_row: dict | None) -> float:
+    """根据真实天气返回当天该城市的订单量乘数。"""
+    if not weather_row:
+        return 1.0
+
+    factor = 1.0
+    code = int(weather_row.get("weather_code") or 0)
+    precip = float(weather_row.get("precipitation_mm") or 0)
+    temp_max = weather_row.get("temp_max_c")
+
+    # 雷暴 / 降雪
+    if code >= 95 or code in (71, 73, 75):
+        factor *= WEATHER_STORM_FACTOR
+    # 降雨
+    elif precip >= WEATHER_RAIN_MM:
+        factor *= WEATHER_RAIN_FACTOR
+
+    # 高温
+    if temp_max is not None and float(temp_max) >= WEATHER_HEAT_C:
+        factor *= WEATHER_HEAT_FACTOR
+
+    return factor
+
+
+def _build_weather_lookup(weather_df: pd.DataFrame | None) -> dict:
+    """{(city_name, 'YYYY-MM-DD'): weather_row}"""
+    if weather_df is None or len(weather_df) == 0:
+        return {}
+    return {
+        (r["city_name"], str(r["date"])[:10]): r
+        for r in weather_df.to_dict("records")
+    }
+
+
+def _build_crypto_lookup(crypto_prices_df: pd.DataFrame | None):
+    """
+    返回:
+      prices:  {(ticker, 'YYYY-MM-DD'): price_usd}
+      returns: {'YYYY-MM-DD': btc_daily_return}
+    """
+    prices, btc_by_date = {}, {}
+    if crypto_prices_df is None or len(crypto_prices_df) == 0:
+        return prices, {}
+
+    for r in crypto_prices_df.to_dict("records"):
+        ticker = str(r["ticker"]).upper()
+        day = str(r["recorded_at"])[:10]
+        price = float(r["price_usd"])
+        prices[(ticker, day)] = price
+        if ticker == "BTC":
+            btc_by_date[day] = price
+
+    ordered = sorted(btc_by_date.items())
+    returns = {}
+    for i in range(1, len(ordered)):
+        prev = ordered[i - 1][1]
+        if prev:
+            returns[ordered[i][0]] = ordered[i][1] / prev - 1
+    return prices, returns
+
+
+def load_drivers_from_db():
+    """从数仓读取天气和币价作为订单生成输入；表为空时返回 (None, None)。"""
+    from sqlalchemy import text
+    from config.db_connection import engine
+
+    try:
+        weather_df = pd.read_sql(text("""
+            SELECT c.city_name, w.date_id, w.temp_max_c,
+                   w.precipitation_mm, w.weather_code
+            FROM dim_weather w
+            JOIN dim_city c ON w.city_id = c.city_id
+        """), engine)
+        if len(weather_df):
+            weather_df["date"] = pd.to_datetime(
+                weather_df["date_id"].astype(str), format="%Y%m%d"
+            ).dt.strftime("%Y-%m-%d")
+
+        crypto_df = pd.read_sql(text("""
+            SELECT ticker, price_usd, recorded_at FROM dim_crypto
+        """), engine)
+    except Exception as e:
+        print(f"  [WARN] 读取天气/币价失败，使用无效应模式: {e}")
+        return None, None
+
+    return (weather_df if len(weather_df) else None,
+            crypto_df if len(crypto_df) else None)
 
 
 def generate_orders(products_df: pd.DataFrame, customers_df: pd.DataFrame,
-                    start_date: date = None, days: int = 365,
-                    crypto_rates: dict = None) -> pd.DataFrame:
+                    start_date: date = None, days: int = None,
+                    crypto_rates: dict = None,
+                    weather_df: pd.DataFrame = None,
+                    crypto_prices_df: pd.DataFrame = None) -> pd.DataFrame:
     """
-    生成模拟订单。
+    生成模拟订单 — 订单量由真实天气驱动，加密支付占比由真实币价驱动。
+
+    效应参数在 config/settings.py 中显式设定，分析管道应当能还原这些效应。
 
     Args:
         products_df: 产品表
         customers_df: 客户表
-        start_date: 起始日期，默认365天前
-        days: 模拟天数
-        crypto_rates: {"BTC": 68000, "ETH": 3400} 用于加密支付汇率
+        start_date: 起始日期；默认取天气数据起始日，否则365天前
+        days: 模拟天数；默认覆盖天气数据范围，否则365天
+        crypto_rates: 无历史币价时的兜底汇率
+        weather_df: 历史天气（city_name, date, precipitation_mm, weather_code, temp_max_c）
+        crypto_prices_df: 历史日线（ticker, recorded_at, price_usd）
 
     Returns:
         订单DataFrame
     """
-    if start_date is None:
-        start_date = date.today() - timedelta(days=days)
-
     crypto_rates = crypto_rates or {"BTC": 68000, "ETH": 3400}
+    weather_lookup = _build_weather_lookup(weather_df)
+    crypto_lookup, btc_returns = _build_crypto_lookup(crypto_prices_df)
+
+    if start_date is None:
+        if weather_lookup:
+            start_date = min(date.fromisoformat(d) for _, d in weather_lookup)
+        else:
+            start_date = date.today() - timedelta(days=365)
+
+    if days is None:
+        if weather_lookup:
+            end_date = max(date.fromisoformat(d) for _, d in weather_lookup)
+            days = (end_date - start_date).days + 1
+        else:
+            days = 365
+
     product_list = products_df.to_dict("records")
-    customer_list = customers_df.to_dict("records")
+
+    # 客户按城市分组，订单在城市内生成，才能应用城市级天气
+    customers_by_city = {}
+    for c in customers_df.to_dict("records"):
+        customers_by_city.setdefault(c["city_name"], []).append(c)
+
+    # 为客户分配购买倾向和流失时间，使 RFM 分层有真实差异：
+    #  - 少数高频客户贡献大部分订单
+    #  - 约 35% 客户在一年内逐步流失，Recency 因此拉开
+    #  - 停用客户不产生订单
+    for custs in customers_by_city.values():
+        for c in custs:
+            if not bool(c.get("is_active", True)):
+                c["_propensity"] = 0.0
+                c["_churn_day"] = 0
+                continue
+
+            c["_propensity"] = float(min(np.random.lognormal(0.0, 0.8), 8.0))
+            if np.random.random() < 0.35 and days > 1:
+                lo = min(30, days - 1)
+                c["_churn_day"] = int(np.random.randint(lo, days))
+            else:
+                c["_churn_day"] = days  # 全年活跃
+
+    city_order = [c for c in WEATHER_CITIES if c in customers_by_city]
+    if not city_order:
+        city_order = list(customers_by_city)
+    n_cities = len(city_order)
 
     orders = []
     min_orders, max_orders = ORDERS_PER_DAY
 
     for day_offset in range(days):
         d = start_date + timedelta(days=day_offset)
+        day_key = d.isoformat()
 
-        # 当天订单数 = 基础范围 × 季节性 × 周末效应
+        # 当天订单数 = 基础范围 × 季节性 × 周末效应 × 随机波动
         base_count = np.random.randint(min_orders, max_orders + 1)
         multiplier = _seasonal_multiplier(d) * _weekend_multiplier(d)
         daily_count = max(10, int(base_count * multiplier))
-
-        # 添加随机波动
         daily_count = int(daily_count * np.random.uniform(0.85, 1.15))
 
-        for _ in range(daily_count):
-            customer = customer_list[np.random.randint(0, len(customer_list))]
-            product  = product_list[np.random.randint(0, len(product_list))]
+        # 加密支付占比：由 BTC 当日涨跌幅决定
+        btc_return = btc_returns.get(day_key)
+        if btc_return is None:
+            crypto_share = CRYPTO_SHARE_BASE
+        elif btc_return > CRYPTO_RETURN_THRESHOLD:
+            crypto_share = CRYPTO_SHARE_UP
+        elif btc_return < -CRYPTO_RETURN_THRESHOLD:
+            crypto_share = CRYPTO_SHARE_DOWN
+        else:
+            crypto_share = CRYPTO_SHARE_BASE
 
-            # 数量：大部分买1件，偶尔买2-5件
-            qty = 1 if np.random.random() < 0.85 else np.random.randint(2, 6)
+        for city in city_order:
+            weather_row = weather_lookup.get((city, day_key))
 
-            # 折扣：根据品类不同
-            cat_discount = {
-                "Smartphones": np.random.choice([0, 5, 10], p=[0.6, 0.3, 0.1]),
-                "Laptops":     np.random.choice([0, 5, 10, 15], p=[0.5, 0.3, 0.15, 0.05]),
-                "Headphones":  np.random.choice([0, 10, 20], p=[0.4, 0.4, 0.2]),
-                "Tablets":     np.random.choice([0, 10, 15], p=[0.5, 0.35, 0.15]),
-                "Wearables":   np.random.choice([0, 15, 25], p=[0.35, 0.4, 0.25]),
-            }.get(product["category"], 0)
+            # 城市当日订单量，叠加该城市真实天气的效应
+            city_count = max(1, int(
+                daily_count / n_cities * _weather_multiplier(weather_row)
+            ))
 
-            # 周末额外折扣
-            if d.weekday() >= 5 and np.random.random() < 0.2:
-                cat_discount = min(50, cat_discount + 10)
+            # 当天仍活跃的客户，按购买倾向加权抽样
+            active = [
+                c for c in customers_by_city[city]
+                if c["_churn_day"] > day_offset
+            ]
+            if not active:
+                active = customers_by_city[city]
+            weights = np.array([c["_propensity"] for c in active], dtype=float)
+            if weights.sum() <= 0:
+                weights = np.ones(len(active))
+            cdf = np.cumsum(weights / weights.sum())
 
-            unit_price = product["unit_price"]
-            net_amount = round(unit_price * qty * (1 - cat_discount / 100), 2)
+            for _ in range(city_count):
+                idx = int(np.searchsorted(cdf, np.random.random()))
+                customer = active[min(idx, len(active) - 1)]
+                product  = product_list[np.random.randint(0, len(product_list))]
 
-            # 支付方式
-            pay_method, ticker, rate = _payment_method()
-            if ticker:
-                rate = crypto_rates.get(ticker, 0)
+                # 数量：大部分买1件，偶尔买2-5件
+                qty = 1 if np.random.random() < 0.85 else np.random.randint(2, 6)
 
-            # 时间戳（在当天的随机时刻）
-            hour = np.random.randint(6, 23)
-            minute = np.random.randint(0, 60)
-            order_time = datetime(d.year, d.month, d.day, hour, minute)
+                # 折扣：根据品类不同
+                cat_discount = {
+                    "Smartphones": np.random.choice([0, 5, 10], p=[0.6, 0.3, 0.1]),
+                    "Laptops":     np.random.choice([0, 5, 10, 15], p=[0.5, 0.3, 0.15, 0.05]),
+                    "Headphones":  np.random.choice([0, 10, 20], p=[0.4, 0.4, 0.2]),
+                    "Tablets":     np.random.choice([0, 10, 15], p=[0.5, 0.35, 0.15]),
+                    "Wearables":   np.random.choice([0, 15, 25], p=[0.35, 0.4, 0.25]),
+                }.get(product["category"], 0)
 
-            orders.append({
-                "customer_id": customer["customer_id"],
-                "product_id": product["product_id"],
-                "date_id": int(d.strftime("%Y%m%d")),
-                "city_name": customer["city_name"],
-                "quantity": qty,
-                "unit_price": unit_price,
-                "discount_pct": cat_discount,
-                "net_amount": net_amount,
-                "payment_method": pay_method,
-                "crypto_ticker": ticker,
-                "crypto_rate_usd": rate,
-                "order_status": "completed" if np.random.random() < 0.95 else "cancelled",
-                "order_timestamp": order_time,
-            })
+                # 周末额外折扣
+                if d.weekday() >= 5 and np.random.random() < 0.2:
+                    cat_discount = min(50, cat_discount + 10)
 
-    df = pd.DataFrame(orders)
-    return df
+                unit_price = product["unit_price"]
+                net_amount = round(unit_price * qty * (1 - cat_discount / 100), 2)
+
+                # 支付方式（加密占比由当天币价决定）
+                pay_method, ticker, rate = _payment_method(crypto_share)
+                if ticker:
+                    # 汇率取当天真实收盘价
+                    rate = crypto_lookup.get(
+                        (ticker, day_key), crypto_rates.get(ticker, 0)
+                    )
+
+                # 时间戳（在当天的随机时刻）
+                hour = np.random.randint(6, 23)
+                minute = np.random.randint(0, 60)
+                order_time = datetime(d.year, d.month, d.day, hour, minute)
+
+                orders.append({
+                    "customer_id": customer["customer_id"],
+                    "product_id": product["product_id"],
+                    "date_id": int(d.strftime("%Y%m%d")),
+                    "city_name": city,
+                    "quantity": qty,
+                    "unit_price": unit_price,
+                    "discount_pct": cat_discount,
+                    "net_amount": net_amount,
+                    "payment_method": pay_method,
+                    "crypto_ticker": ticker,
+                    "crypto_rate_usd": rate,
+                    "order_status": "completed" if np.random.random() < 0.95 else "cancelled",
+                    "order_timestamp": order_time,
+                })
+
+    return pd.DataFrame(orders)
 
 
 # ═══════════════════════════════════════════
@@ -288,7 +464,10 @@ def generate_all(force: bool = False) -> dict[str, pd.DataFrame]:
         print(f"  [SKIP] 订单数据已存在，跳过生成")
         orders_df = pd.read_csv(orders_path)
     else:
-        orders_df = generate_orders(products_df, customers_df)
+        weather_df, crypto_df = load_drivers_from_db()
+        orders_df = generate_orders(products_df, customers_df,
+                                    weather_df=weather_df,
+                                    crypto_prices_df=crypto_df)
         orders_df.to_csv(orders_path, index=False)
         print(f"  [OK] 生成 {len(orders_df):,} 条订单 -> {orders_path}")
 

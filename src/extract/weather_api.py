@@ -7,7 +7,9 @@ import time
 import requests
 from datetime import datetime, date
 from typing import Optional
-from config.settings import WEATHER_CITIES, WEATHER_API, DATA_RAW
+from config.settings import (
+    WEATHER_CITIES, WEATHER_API, WEATHER_ARCHIVE_API, DATA_RAW
+)
 
 
 # 天气代码→描述映射
@@ -23,7 +25,8 @@ WMO_CODES = {
 
 
 def fetch_weather_for_city(lat: float, lon: float, city_name: str,
-                           start_date: str, end_date: str) -> list[dict]:
+                           start_date: str, end_date: str,
+                           api_url: str = WEATHER_API) -> list[dict]:
     """
     获取单个城市的每日天气数据。
 
@@ -45,7 +48,7 @@ def fetch_weather_for_city(lat: float, lon: float, city_name: str,
         "end_date": end_date,
     }
 
-    resp = requests.get(WEATHER_API, params=params, timeout=15)
+    resp = requests.get(api_url, params=params, timeout=30)
     resp.raise_for_status()
     data = resp.json()
 
@@ -98,6 +101,36 @@ def fetch_all_cities(days_back: int = 7) -> list[dict]:
         try:
             print(f"  [*] Fetching {city_name} weather... ({start_str} ~ {end_str})")
             rows = fetch_weather_for_city(lat, lon, city_name, start_str, end_str)
+            all_rows.extend(rows)
+            print(f"    [OK] {len(rows)} records")
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"    [FAIL] {city_name}: {e}")
+
+    return all_rows
+
+
+def fetch_history_all_cities(start_date, end_date) -> list[dict]:
+    """
+    获取所有城市的历史每日天气（Open-Meteo 归档 API，1940年至今）。
+
+    Args:
+        start_date/end_date: date 或 "YYYY-MM-DD"
+
+    Returns:
+        所有城市的天气记录列表
+    """
+    start_str = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
+    end_str = end_date.isoformat() if hasattr(end_date, "isoformat") else str(end_date)
+
+    all_rows = []
+    for city_name, (lat, lon) in WEATHER_CITIES.items():
+        try:
+            print(f"  [*] Fetching {city_name} history... ({start_str} ~ {end_str})")
+            rows = fetch_weather_for_city(
+                lat, lon, city_name, start_str, end_str,
+                api_url=WEATHER_ARCHIVE_API,
+            )
             all_rows.extend(rows)
             print(f"    [OK] {len(rows)} records")
             time.sleep(0.3)

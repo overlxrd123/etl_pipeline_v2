@@ -149,24 +149,9 @@ def get_rfm_segments():
             GROUP BY f.customer_id
         )
         SELECT *,
-            CASE
-                WHEN 距上次购买天 <= 30  THEN 4
-                WHEN 距上次购买天 <= 90  THEN 3
-                WHEN 距上次购买天 <= 180 THEN 2
-                ELSE 1
-            END AS r_score,
-            CASE
-                WHEN 购买次数 >= 50 THEN 4
-                WHEN 购买次数 >= 20 THEN 3
-                WHEN 购买次数 >= 10 THEN 2
-                ELSE 1
-            END AS f_score,
-            CASE
-                WHEN 消费金额 >= 10000 THEN 4
-                WHEN 消费金额 >= 3000  THEN 3
-                WHEN 消费金额 >= 1000  THEN 2
-                ELSE 1
-            END AS m_score
+            5 - NTILE(4) OVER (ORDER BY 距上次购买天 ASC) AS r_score,
+            NTILE(4) OVER (ORDER BY 购买次数 ASC)        AS f_score,
+            NTILE(4) OVER (ORDER BY 消费金额 ASC)        AS m_score
         FROM customer_rfm
     """)
 
@@ -183,17 +168,89 @@ def get_pipeline_stats():
     """)
 
 
-def get_weather_sales_summary():
+def get_crypto_impact():
+    """每日 BTC 价格、涨跌幅与加密支付占比"""
     return query_to_df("""
         SELECT
-            w.weather_desc                 AS 天气,
-            COUNT(DISTINCT f.order_id)     AS 订单数,
-            SUM(f.net_amount)              AS 营收,
-            AVG(f.net_amount)              AS 客单价
-        FROM fact_orders f
+            price_date              AS 日期,
+            close_price_usd         AS BTC价格,
+            daily_return_pct        AS BTC日涨跌幅,
+            total_orders            AS 订单数,
+            crypto_orders           AS 加密订单数,
+            crypto_order_share_pct  AS 加密支付占比,
+            crypto_revenue          AS 加密支付营收,
+            btc_movement            AS 行情
+        FROM mart_crypto_impact
+        ORDER BY price_date
+    """)
+
+
+def get_crypto_impact_summary():
+    """按 BTC 行情分组，比较加密支付占比"""
+    return query_to_df("""
+        SELECT
+            btc_movement                        AS 行情,
+            COUNT(*)                            AS 天数,
+            ROUND(AVG(crypto_order_share_pct), 2) AS 平均加密支付占比,
+            ROUND(AVG(total_orders), 0)         AS 平均日订单数
+        FROM mart_crypto_impact
+        WHERE btc_movement IN ('上涨 >2%', '下跌 <-2%', '震荡')
+        GROUP BY btc_movement
+        ORDER BY 平均加密支付占比 DESC
+    """)
+
+
+def get_weather_sales_summary():
+    """按天气类别比较城市日平均；订单指数已剔除日期/季节波动。
+
+    订单指数 = 当天该城市订单份额 / 该城市全年平均份额 × 100
+    100 表示平常水平，低于 100 表示需求下降。
+    """
+    return query_to_df("""
+        WITH city_day AS (
+            SELECT
+                f.date_id,
+                f.city_id,
+                COUNT(*)          AS orders,
+                SUM(f.net_amount) AS revenue
+            FROM fact_orders f
+            WHERE f.order_status = 'completed'
+            GROUP BY f.date_id, f.city_id
+        ),
+        city_share AS (
+            SELECT
+                *,
+                orders * 1.0 / SUM(orders) OVER (PARTITION BY date_id) AS day_share
+            FROM city_day
+        ),
+        city_base AS (
+            SELECT city_id, AVG(day_share) AS base_share
+            FROM city_share
+            GROUP BY city_id
+        ),
+        normalized AS (
+            SELECT
+                s.*,
+                s.day_share / b.base_share AS orders_index
+            FROM city_share s
+            JOIN city_base b ON s.city_id = b.city_id
+        )
+        SELECT
+            CASE
+                WHEN w.weather_code >= 95
+                     OR w.weather_code IN (71, 73, 75) THEN '雷暴/降雪'
+                WHEN w.precipitation_mm >= 5           THEN '雨天'
+                WHEN w.temp_max_c >= 35                THEN '高温'
+                ELSE '无雨'
+            END AS 天气,
+            COUNT(*)                                      AS 城市天数,
+            ROUND(AVG(n.orders), 1)                       AS 订单数,
+            ROUND(AVG(n.revenue), 2)                      AS 营收,
+            ROUND(AVG(n.revenue * 1.0 / n.orders), 2)     AS 客单价,
+            ROUND(AVG(n.orders_index) * 100, 1)           AS 订单指数
+        FROM normalized n
         JOIN dim_weather w
-            ON f.city_id = w.city_id AND f.date_id = w.date_id
-        WHERE f.order_status = 'completed'
-        GROUP BY w.weather_desc
-        ORDER BY 营收 DESC
+            ON n.city_id = w.city_id AND n.date_id = w.date_id
+        GROUP BY 天气
+        ORDER BY 订单指数 DESC
     """)

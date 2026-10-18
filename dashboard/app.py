@@ -44,6 +44,7 @@ with st.sidebar:
     - 📈 **概览** — KPI总览
     - 💰 **销售分析** — 销售趋势与排名
     - 🌤 **天气影响** — 天气与销售关联
+    - ₿ **币价影响** — BTC涨跌与支付方式
     - 👥 **客户分层** — RFM客户价值分层
     - 🔧 **管道健康** — ETL运行监控
     """)
@@ -51,11 +52,11 @@ with st.sidebar:
     st.divider()
     st.markdown("### 技术栈")
     st.caption("Python · Prefect · dbt · SQLite · Streamlit")
-    st.caption("数据源: 电商模拟 + Open-Meteo天气 + CoinGecko加密")
+    st.caption("数据源: 电商模拟订单 + Open-Meteo天气 + Binance/CoinGecko币价")
 
 # ── 主页 ─────────────────────────────────
 st.markdown('<p class="main-header">电商数据分析看板</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">自动化 ETL 管道驱动的实时商业智能看板</p>',
+st.markdown('<p class="sub-header">自动化 ETL 管道驱动的商业智能看板</p>',
             unsafe_allow_html=True)
 
 from dashboard.utils.db_queries import get_kpi_summary, get_pipeline_stats, get_monthly_trend, get_category_revenue
