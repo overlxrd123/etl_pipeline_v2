@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from dashboard.utils.db_queries import get_pipeline_stats
+from dashboard.utils.db_queries import get_pipeline_stats, get_driver_coverage
 
 st.title("🔧 管道健康监控")
 st.caption("ETL管道运行状态 & 数据质量检查")
@@ -125,10 +125,47 @@ with engine.connect() as conn:
     if latest_crypto:
         st.metric("最新加密价格采集", str(latest_crypto)[:19])
 
+st.divider()
+
+# 驱动数据覆盖
+st.subheader("驱动数据覆盖")
+cov = get_driver_coverage()
+order_days = int(cov["订单天数"] or 0)
+order_city_days = int(cov["订单城市日"] or 0)
+weather_cov = (
+    float(cov["天气匹配城市日"]) / order_city_days * 100
+    if order_city_days else 0.0
+)
+crypto_cov = (
+    float(cov["币价匹配天数"]) / order_days * 100
+    if order_days else 0.0
+)
+
+c1, c2, c3 = st.columns(3)
+c1.metric(
+    "订单日期范围",
+    f"{cov['订单起始日']} ~ {cov['订单结束日']}",
+    help=f"共 {order_days} 天",
+)
+c2.metric("天气覆盖率", f"{weather_cov:.1f}%", help="订单城市日中能找到天气数据的比例")
+c3.metric("币价覆盖率", f"{crypto_cov:.1f}%", help="订单日期中能找到 BTC 价格的比例")
+
+if weather_cov < 99.9 or crypto_cov < 99.9:
+    st.warning("""
+    部分订单找不到对应的天气/币价。影响分析只会使用**有订单的日期**，
+    新抓取但没有订单的驱动数据不会进入分析。
+    """)
+else:
+    st.success("订单与天气/币价覆盖完整，影响分析使用的是同一时间窗口。")
+
 st.info("""
 **数据刷新方式（当前为手动触发，未配置定时任务）：**
-- 天气：`python -m orchestration.flows.ingest_weather`（最近 7 天）
+- 天气：`python -m orchestration.flows.ingest_weather`（最近 7 天预报）
 - 币价：`python -m orchestration.flows.ingest_crypto`（当前现货价）
-- 历史演示数据：`python rebuild_demo_data.py`（365 天窗口）
+- 历史演示数据：`python rebuild_demo_data.py`（365 天窗口，重生成订单）
+- 顺便导出 Power BI：`python rebuild_demo_data.py --pbi`
 - dbt 转换：`cd dbt_project && dbt run --profiles-dir .`
+
+> 单独抓取新天气/币价只会追加维度数据；要让它们影响订单和看板，
+> 需要重建订单（或调整 `config/settings.py` 的 `SIM_START` / `SIM_END` 后重建）。
 """)

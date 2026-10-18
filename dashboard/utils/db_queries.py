@@ -168,6 +168,47 @@ def get_pipeline_stats():
     """)
 
 
+def get_driver_coverage():
+    """订单日期与天气/币价数据的覆盖情况。
+
+    影响分析只会使用「有订单的日期」，因此新抓取但没有订单的
+    天气/币价不会进入分析结果。
+    """
+    return query_to_df("""
+        WITH order_city_day AS (
+            SELECT DISTINCT date_id, city_id
+            FROM fact_orders
+            WHERE order_status = 'completed'
+        ),
+        weather_city_day AS (
+            SELECT DISTINCT date_id, city_id
+            FROM dim_weather
+        ),
+        order_day AS (
+            SELECT DISTINCT date_id
+            FROM fact_orders
+            WHERE order_status = 'completed'
+        ),
+        crypto_day AS (
+            SELECT DISTINCT CAST(strftime('%Y%m%d', recorded_at) AS INTEGER) AS date_id
+            FROM dim_crypto
+            WHERE ticker = 'BTC'
+        )
+        SELECT
+            (SELECT MIN(date_id) FROM order_day) AS 订单起始日,
+            (SELECT MAX(date_id) FROM order_day) AS 订单结束日,
+            (SELECT COUNT(*) FROM order_day)     AS 订单天数,
+            (SELECT COUNT(*) FROM order_city_day) AS 订单城市日,
+            (SELECT COUNT(*)
+               FROM order_city_day o
+               JOIN weather_city_day w
+                 ON o.date_id = w.date_id AND o.city_id = w.city_id) AS 天气匹配城市日,
+            (SELECT COUNT(*)
+               FROM order_day o
+               JOIN crypto_day c ON o.date_id = c.date_id) AS 币价匹配天数
+    """).iloc[0].to_dict()
+
+
 def get_crypto_impact():
     """每日 BTC 价格、涨跌幅与加密支付占比"""
     return query_to_df("""

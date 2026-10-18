@@ -11,6 +11,7 @@
   python rebuild_demo_data.py            # 复用 data/raw 缓存
   python rebuild_demo_data.py --refresh  # 重新下载历史数据
   python rebuild_demo_data.py --no-backup
+  python rebuild_demo_data.py --pbi      # 重建后顺便导出 Power BI CSV
 """
 import argparse
 import shutil
@@ -36,6 +37,7 @@ from src.extract.crypto_api import fetch_crypto_history
 from src.extract.transaction_generator import generate_orders
 from src.load.raw_to_staging import load_weather, load_crypto
 from src.load.staging_to_warehouse import load_orders
+from export_pbi_demo import export_pbi_demo as export_pbi_csv
 
 
 WEATHER_CACHE = DATA_RAW / "history_weather.csv"
@@ -144,6 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description="重建由真实天气/币价驱动的演示数据")
     parser.add_argument("--refresh", action="store_true", help="重新下载历史数据")
     parser.add_argument("--no-backup", action="store_true", help="跳过数据库备份")
+    parser.add_argument("--pbi", action="store_true", help="重建后导出 Power BI CSV")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -165,6 +168,10 @@ def main():
 
     print("\n[4/4] 重新生成订单")
     loaded = rebuild_orders(weather_df, crypto_df)
+
+    if args.pbi:
+        print("\n[PBI] 导出 Power BI CSV")
+        export_pbi_csv()
 
     print("\n" + "=" * 60)
     print(f"[DONE] 重建完成 — 订单 {loaded:,} 条，天气 {weather_count:,} 条，币价 {crypto_count:,} 条")

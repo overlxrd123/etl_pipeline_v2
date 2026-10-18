@@ -60,6 +60,7 @@ etl_pipeline_v2/
 │   └── pages/              # 6 个交互页面
 ├── seed_data.py            # 初始化 dim_date + dim_city
 ├── rebuild_demo_data.py    # 一键重建：历史天气/币价 → 驱动订单
+├── export_pbi_demo.py      # 导出 Power BI CSV（派生数据，不入库）
 └── requirements.txt
 ```
 
@@ -75,6 +76,8 @@ python seed_data.py
 # 3. 一键重建演示数据（推荐）
 #    抓取订单窗口内的真实天气/币价，并用它们驱动订单生成
 python rebuild_demo_data.py
+#    需要 Power BI 的 CSV 时，顺便导出：
+python rebuild_demo_data.py --pbi
 
 # 4. dbt 建模 + 数据测试
 cd dbt_project
@@ -121,6 +124,9 @@ python -m orchestration.flows.run_full_pipeline  # Prefect 完整管道
   100 表示平常水平；同一天的季节、周末、节假日波动会被抵消。
 - 币价按日关联，比较 BTC 上涨/下跌/震荡三组的加密支付占比
 - 结论用于**验证数据管道能否还原设定效应**，不是对现实世界的因果推断
+- 分析只使用**有订单的日期**。单独抓取新的天气/币价只会追加维度数据，
+  不会改变已有分析；要让新数据参与分析，需要重建订单或调整
+  `SIM_START` / `SIM_END` 后重建。看板「管道健康」页会显示两者的覆盖率。
 
 ### 验证结果（当前数据：2025-08-11 ~ 2026-08-10）
 
