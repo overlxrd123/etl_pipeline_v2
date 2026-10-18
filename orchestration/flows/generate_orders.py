@@ -45,11 +45,18 @@ def task_gen_customers(force: bool = False):
 def task_gen_orders(products_df, customers_df):
     """生成订单"""
     import pandas as pd
-    from config.settings import DATA_PROCESSED
+    from datetime import date
+    from config.settings import DATA_PROCESSED, SIM_START, SIM_END
 
     # 读取真实天气/币价作为订单生成输入
     weather_df, crypto_df = load_drivers_from_db()
+
+    # 固定使用配置中的模拟窗口，避免驱动数据只有几天时
+    # 订单窗口也跟着缩成几天
+    start = date.fromisoformat(SIM_START)
+    days = (date.fromisoformat(SIM_END) - start).days + 1
     df = generate_orders(products_df, customers_df,
+                         start_date=start, days=days,
                          weather_df=weather_df,
                          crypto_prices_df=crypto_df)
     df.to_csv(DATA_PROCESSED / "orders.csv", index=False)

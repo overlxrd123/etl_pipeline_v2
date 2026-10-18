@@ -1,6 +1,6 @@
 """
 Prefect Flow: 加密汇率采集 + 加载
-每5分钟从 CoinGecko 获取 BTC/ETH 价格 → 写入 dim_crypto
+从 Binance 获取 BTC/ETH 现货价（CoinGecko / Gate.io 兜底）→ 写入 dim_crypto
 """
 import sys
 from pathlib import Path

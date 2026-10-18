@@ -20,29 +20,29 @@ def task_run_dbt():
     import subprocess
     dbt_dir = Path(__file__).parent.parent.parent / "dbt_project"
 
+    # --profiles-dir . 不能省略：profile 在 dbt_project/ 里，
+    # 默认位置 ~/.dbt/profiles.yml 不存在
     print("[dbt] 运行 dbt run...")
     result = subprocess.run(
-        ["dbt", "run"],
+        ["dbt", "run", "--profiles-dir", "."],
         cwd=str(dbt_dir),
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        print(f"[dbt] run 警告:\n{result.stderr[:500]}")
-    else:
-        print(f"[dbt] run 完成")
+        raise RuntimeError(f"dbt run 失败:\n{result.stderr[:1000]}")
+    print("[dbt] run 完成")
 
     print("[dbt] 运行 dbt test...")
     result = subprocess.run(
-        ["dbt", "test"],
+        ["dbt", "test", "--profiles-dir", "."],
         cwd=str(dbt_dir),
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        print(f"[dbt] test 警告:\n{result.stderr[:500]}")
-    else:
-        print(f"[dbt] test 完成")
+        raise RuntimeError(f"dbt test 失败:\n{result.stderr[:1000]}")
+    print("[dbt] test 完成")
 
     return True
 
@@ -78,7 +78,7 @@ def task_quality_check():
 
 
 @flow(name="full-etl-pipeline")
-def run_full_pipeline(skip_api: bool = False, skip_dbt: bool = True):
+def run_full_pipeline(skip_api: bool = False, skip_dbt: bool = False):
     """
     完整 ETL 管道
 

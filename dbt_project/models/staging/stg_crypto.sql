@@ -1,4 +1,4 @@
--- stg_crypto: 加密汇率维度清洗 + 每小时均价
+-- stg_crypto: 加密汇率维度清洗 + 小时标记
 SELECT
     crypto_id,
     ticker,

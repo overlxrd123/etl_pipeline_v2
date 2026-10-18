@@ -1,6 +1,6 @@
 """
 Prefect Flow: 天气数据采集 + 加载
-每日从 Open-Meteo 获取5个城市天气 → 写入 dim_weather
+从 Open-Meteo 获取 5 个城市最近 N 天天气（默认 7 天）→ 写入 dim_weather
 """
 import sys
 from pathlib import Path
