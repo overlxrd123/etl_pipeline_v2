@@ -295,3 +295,25 @@ def get_weather_sales_summary():
         GROUP BY 天气
         ORDER BY 订单指数 DESC
     """)
+
+
+def get_weather_effect():
+    """天气效应还原 — 同日跨城市对比 vs 直接跨天对比。
+
+    数据来自 dbt 模型 mart_weather_effect。isolated_ratio 用「同一天受影响城市
+    均值 / 未受影响城市均值」计算，天然控制掉季节和周末效应，应接近仿真设定值；
+    confounded_ratio 是不控制日期的直接比较，用来展示季节混淆的影响。
+    """
+    return query_to_df("""
+        SELECT
+            factor                        AS 因子,
+            factor_desc                   AS 说明,
+            affected_city_days            AS 受影响城市天数,
+            comparable_days               AS 可比天数,
+            isolated_ratio                AS 隔离后比值,
+            confounded_ratio              AS 未隔离比值,
+            setting_ratio                 AS 设定值,
+            deviation_pct_points          AS 偏差百分点
+        FROM mart_weather_effect
+        ORDER BY factor
+    """)

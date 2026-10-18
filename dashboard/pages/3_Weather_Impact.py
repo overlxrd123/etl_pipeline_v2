@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import streamlit as st
-from dashboard.utils.db_queries import get_weather_sales_summary
+from dashboard.utils.db_queries import get_weather_sales_summary, get_weather_effect
 from dashboard.utils.charts import bar_chart, pie_chart
 
 st.title("🌤 天气对销售的影响")
@@ -73,3 +73,58 @@ else:
         **效应设定：** 雨天订单量 ×0.90，雷暴/降雪 ×0.80，高温 ×0.95。
         由于样本量和取整误差，分析结果不会与设定值完全相等，但方向和幅度应基本一致。
         """)
+
+# ── 效应还原：同日跨城市对比 ───────────────────────────────────────────
+st.divider()
+st.subheader("🎯 效应还原：同日跨城市对比")
+st.caption(
+    "上面的「订单指数」是跨天比较，雪天集中在冬季、高温集中在夏季，"
+    "季节和周末效应会和天气效应混在一起。这里改成**固定日期、比较同日不同城市**："
+    "同一天所有城市共享同一基础订单量，只有天气乘数不同，"
+    "所以「当天受影响城市均值 ÷ 当天未受影响城市均值」就是纯粹的天气效应。"
+)
+
+effect = get_weather_effect()
+
+if effect.empty:
+    st.warning("未找到 mart_weather_effect，请先运行：dbt run --select mart_weather_effect")
+else:
+    effect_display = effect.copy()
+    effect_display = effect_display[[
+        "因子", "说明", "受影响城市天数", "可比天数",
+        "未隔离比值", "隔离后比值", "设定值", "偏差百分点",
+    ]]
+
+    st.dataframe(effect_display.style.format({
+        "未隔离比值": "{:.4f}", "隔离后比值": "{:.4f}",
+        "设定值": "{:.2f}", "偏差百分点": "{:+.2f}",
+    }), width='stretch', hide_index=True)
+
+    valid = effect.dropna(subset=["隔离后比值"])
+    if not valid.empty:
+        max_dev = valid["偏差百分点"].abs().max()
+        st.success(
+            f"同日对比法把设定乘数还原到 **{valid['隔离后比值'].min():.3f} ~ "
+            f"{valid['隔离后比值'].max():.3f}**，"
+            f"最大偏差 **{max_dev:.2f} 个百分点**；"
+            f"而直接跨天比较给出的是 "
+            f"{valid['未隔离比值'].min():.3f} ~ {valid['未隔离比值'].max():.3f}，"
+            "明显被季节效应拉偏。"
+        )
+
+    no_sample = effect[effect["隔离后比值"].isna()]
+    if not no_sample.empty:
+        st.caption(
+            "无样本因子：" + "、".join(no_sample["因子"].tolist())
+            + " —— 当前天气数据里没有这类天气的城市日，属于样本问题，不是管道问题。"
+        )
+
+st.markdown("""
+**为什么必须这样比？**
+
+- 直接比较「雪天订单」和「非雪天订单」：雪天集中在冬季，冬季本身订单基数就低，
+  算出来的差距里既有天气效应也有季节效应，无法归因。
+- 同日跨城市比较：日期被固定住，季节、周末、节假日对所有城市影响相同，被除法约掉，
+  剩下的就只剩天气乘数。
+- 这也是数据分析里「控制变量」最朴素的应用：**想让一个因素显形，就让其他因素保持相同。**
+""")

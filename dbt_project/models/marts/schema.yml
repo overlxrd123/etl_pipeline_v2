@@ -45,6 +45,27 @@ models:
         tests:
           - not_null
 
+  - name: mart_weather_effect
+    description: >
+      天气效应还原 — 用「同日跨城市对比」隔离季节/周末扰动，
+      还原仿真设定的天气乘数（雨天 0.90 / 降雪·雷暴 0.80 / 高温 0.95）。
+      同时输出未隔离口径（confounded_ratio）作为对照。
+    columns:
+      - name: factor
+        description: "驱动因子：rain / snow / storm / heat"
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['rain', 'snow', 'storm', 'heat']
+      - name: setting_ratio
+        description: "仿真设定值（与 config/settings.py 保持一致）"
+        tests:
+          - not_null
+      - name: isolated_ratio
+        description: "同日跨城市对比后的还原值；无样本时为 NULL（如雷暴）"
+
   - name: mart_crypto_impact
     description: "币价对支付行为影响 — BTC 日涨跌幅与加密支付占比"
     columns:
