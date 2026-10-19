@@ -232,8 +232,8 @@ def load_drivers_from_db():
 
     try:
         weather_df = pd.read_sql(text("""
-            SELECT c.city_name, w.date_id, w.temp_max_c,
-                   w.precipitation_mm, w.weather_code
+            SELECT c.city_name, w.date_id, w.temp_max_c, w.temp_min_c,
+                   w.precipitation_mm, w.wind_speed_kmh, w.weather_code
             FROM dim_weather w
             JOIN dim_city c ON w.city_id = c.city_id
         """), engine)
@@ -366,7 +366,7 @@ def generate_orders(products_df: pd.DataFrame, customers_df: pd.DataFrame,
                 weights = np.ones(len(active))
             cdf = np.cumsum(weights / weights.sum())
 
-            for _ in range(city_count):
+            for city_sequence in range(city_count):
                 idx = int(np.searchsorted(cdf, np.random.random()))
                 customer = active[min(idx, len(active) - 1)]
                 product  = product_list[np.random.randint(0, len(product_list))]
@@ -404,6 +404,7 @@ def generate_orders(products_df: pd.DataFrame, customers_df: pd.DataFrame,
                 order_time = datetime(d.year, d.month, d.day, hour, minute)
 
                 orders.append({
+                    "source_order_id": f"sim:{day_key}:{city}:{city_sequence}",
                     "customer_id": customer["customer_id"],
                     "product_id": product["product_id"],
                     "date_id": int(d.strftime("%Y%m%d")),

@@ -31,7 +31,7 @@ customer_rfm AS (
         SUM(o.quantity) AS total_units
 
     FROM {{ ref('int_orders_enriched') }} o
-    JOIN stg_customers c ON o.customer_id = c.customer_id
+    JOIN {{ ref('stg_customers') }} c ON o.customer_id = c.customer_id
     GROUP BY o.customer_id, c.full_name, c.city_name, c.loyalty_tier, c.signup_date
 ),
 

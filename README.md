@@ -33,11 +33,11 @@ Binance/CoinGecko ──┼── Prefect 调度器 ──► SQLite 数据仓�
 | 层级 | 工具 | 用途 |
 |------|------|------|
 | 调度编排 | **Prefect 3.x** | 任务调度、失败重试、运行监控 |
-| 数据库 | **SQLite + SQLAlchemy** | 数据仓库（改环境变量即可切换 PostgreSQL） |
+| 数据库 | **SQLite + SQLAlchemy** | 本地数据仓库，支持环境变量指定 SQLite 文件 |
 | 数据转换 | **dbt-core + dbt-sqlite** | staging → intermediate → marts 三层建模 |
 | 数据采集 | **Requests + Pandas** | API 客户端 + 电商数据模拟器 |
 | 可视化 | **Streamlit + Plotly** | 6 页交互式分析看板 |
-| 测试 | **pytest + dbt tests** | 数据质量验证 |
+| 测试 | **pytest + dbt tests** | 31 项 dbt 数据测试 + 32 个 pytest 用例 |
 
 ## 项目结构
 
@@ -54,7 +54,7 @@ etl_pipeline_v2/
 │   └── models/
 │       ├── staging/        # 5 个模型（1:1 对应源表）
 │       ├── intermediate/   # 4 个模型（关联 + 聚合）
-│       └── marts/          # 5 个模型（业务就绪）
+│       └── marts/          # 7 个模型（业务就绪）
 ├── dashboard/
 │   ├── app.py              # 主入口
 │   └── pages/              # 6 个交互页面
@@ -79,10 +79,9 @@ python rebuild_demo_data.py
 #    需要 Power BI 的 CSV 时，顺便导出：
 python rebuild_demo_data.py --pbi
 
-# 4. dbt 建模 + 数据测试
+# 4. dbt 建模 + 按依赖执行数据测试
 cd dbt_project
-dbt run --profiles-dir .
-dbt test --profiles-dir .
+dbt build --profiles-dir .
 cd ..
 
 # 5. 启动交互看板
@@ -98,7 +97,27 @@ streamlit run dashboard/app.py
 python -m src.extract.transaction_generator   # 用数仓中的天气/币价生成订单 CSV
 python -m src.load.staging_to_warehouse       # 加载 CSV 到事实表
 python -m orchestration.flows.run_full_pipeline  # Prefect 完整管道
+# 已有历史驱动数据时：跳过网络采集，仍执行质量门禁和 dbt
+python -m orchestration.flows.run_full_pipeline --offline
+# 仅调试入库，不刷新分析结果（必须显式指定）
+python -m orchestration.flows.run_full_pipeline --offline --skip-dbt
 ```
+
+完整管道会初始化缺少的表与种子维度，按 `SIM_START` / `SIM_END` 获取历史天气和币价；已有订单 CSV 时复用原文件，避免重跑时生成另一份随机订单。当前仍为手动触发的 Prefect Flow，没有自动创建定时部署。
+
+## 可靠性与重跑
+
+- **订单幂等加载**：新生成的订单带稳定的 `source_order_id`；上游真实订单也应提供稳定且唯一的该字段。`etl_order_keys` 保存来源标识与事实表订单的映射，订单、映射和批次进度在同一事务中提交。失败后使用同一来源文件重跑，只补齐未提交部分；返回值为本次新增行数。
+- **旧数仓兼容**：首次加载会为旧订单建立映射，不修改其业务字段或订单 ID。旧 CSV 缺少来源 ID 时，使用标准化内容指纹与重复序号识别同一文件的重跑，同时保留完全相同的多笔订单。此兼容模式不能代替真实业务 ID：新批次及更正数据应提供稳定来源 ID，同 ID 不同内容会报错，不会静默覆盖。
+- **输入校验与审计**：金额计算、数量、折扣、支付信息、时间与日期、维度关联均在订单插入前检查。`etl_load_runs` 记录运行状态、新增/跳过行数和异常类型；健康页展示最近的加载批次。
+- **驱动数据更新**：天气按城市与日期更新，币价按币种与 UTC 时间戳去重更新。天气部分城市失败、响应不完整、币价缺少币种或日期时会抛出异常，Prefect 可据此重试。
+- **发布门禁**：订单及维度非空、金额和时间合法、无孤儿记录、订单窗口内天气与 BTC/ETH 覆盖完整后，才执行 `dbt build`。不合格输入不会触发新一轮 marts 构建。
+- **统一指标**：销售查询使用 `mart_orders` 订单粒度快照，RFM 直接读取 `mart_customer_segments`，最近购买天数以数据最新日期为基准。停用客户和产品的历史订单仍被保留。dbt 额外核对清洗层、订单服务层和日汇总的订单数与营收。
+- **显式全量重建**：`rebuild_demo_data.py` 仍是清表重建工具，常规管道不清表。重建前使用 SQLite Backup API 备份，并校验历史驱动覆盖与必要文件；中断后可从备份恢复。多阶段全量重建不等同于一个跨步骤的数据库事务。
+
+首次使用这版代码时，先执行一次 `dbt build --profiles-dir .`，生成新增的 `mart_orders`。订单身份与加载审计表会在下次加载时自动创建。测试命令为 `python -m pytest tests -q`；单元故障测试使用内存数据库，已有数仓的 RFM 集成检查可通过 `ETL_TEST_WAREHOUSE` 指向副本。
+
+当前 dbt 侧共 **16 个模型**（5 staging + 4 intermediate + 7 marts）、**31 项数据测试**；pytest 侧 **32 个用例**，覆盖重复加载、断点续跑、来源 ID 冲突、输入校验与质量门禁。`dbt build` 会按依赖顺序执行模型与测试。
 
 ## 模拟效应与数据口径
 
@@ -157,26 +176,16 @@ python -m orchestration.flows.run_full_pipeline  # Prefect 完整管道
 - **历史数据对齐** — 用订单同期的 365 天真实天气/币价驱动模拟订单
 - **已知效应沙盒** — 效应参数显式设定，分析结果可被验证和还原
 - **真实电商数据模拟** — 季节性波动（黑五/圣诞/Prime Day）、周末效应、多种支付方式
-- **完整 dbt 管道** — staging → intermediate → marts 三层，附带数据测试
+- **完整 dbt 管道** — staging → intermediate → marts 三层共 16 个模型、31 项数据测试
 - **Prefect 自动化调度** — 失败自动重试、结构化日志、任务依赖管理
 - **RFM 客户分层** — 核心客户 / 忠诚客户 / 潜力客户 / 需关注 / 流失风险 / 已流失（分位数打分，适配任意数据规模）
 - **天气影响分析** — 按城市日平均比较雨天/高温/雷暴降雪/无雨，并用订单指数剔除季节波动
 - **币价影响分析** — BTC 涨跌与加密支付占比的关联
 - **管道健康监控** — 数据质量检查、各表行数、最新采集时间
 
-## 切换 PostgreSQL
+## 数据库支持范围
 
-```bash
-# 设置环境变量
-export DATABASE_URL=postgresql://user:pass@localhost:5432/warehouse
-
-# 安装驱动
-pip install psycopg2-binary
-
-# 修改 dbt profile 切换为 postgres adapter
-```
-
-SQLAlchemy 抽象了数据库层，代码无需任何修改。
+当前端到端验证针对 SQLite。可以通过 `DATABASE_URL=sqlite:///绝对路径/warehouse.db` 指定另一份数仓；Prefect 的 dbt 阶段会将相同路径传给 profile，也可单独设置 `ETL_SQLITE_PATH` 运行 dbt。迁移 PostgreSQL 还需要适配 dbt adapter、日期函数、类型与备份脚本，并重新验证，不能只修改连接字符串。
 
 ## 与旧项目对比
 

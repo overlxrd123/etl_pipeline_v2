@@ -14,66 +14,14 @@ from src.warehouse.models import FactOrders, DimCity
 
 
 def load_orders(orders_df: pd.DataFrame = None, batch_size: int = 10000):
-    """加载订单事实表"""
-    session = get_session()
-
-    existing = session.query(FactOrders).count()
-    if existing > 0:
-        print(f"  [SKIP] fact_orders 已有 {existing:,} 条数据")
-        session.close()
-        return existing
-
+    """Validate, deduplicate and resume committed order batches; returns newly inserted rows."""
+    from src.load.order_loader import load_orders_resumable
     if orders_df is None:
         path = DATA_PROCESSED / "orders.csv"
         if not path.exists():
-            print("  [WARN] orders.csv 不存在，请先运行 transaction_generator")
-            session.close()
-            return
-        orders_df = pd.read_csv(path)
-
-    # city_name -> city_id 映射
-    cities = {c.city_name: c.city_id for c in session.query(DimCity).all()}
-
-    # 解析时间戳
-    orders_df["order_timestamp"] = pd.to_datetime(orders_df["order_timestamp"])
-
-    records = orders_df.to_dict("records")
-    total = len(records)
-    loaded = 0
-
-    for i, r in enumerate(records):
-        city_id = cities.get(r.get("city_name"))
-        if not city_id:
-            continue
-
-        session.add(FactOrders(
-            customer_id=r["customer_id"],
-            product_id=r["product_id"],
-            date_id=r["date_id"],
-            city_id=city_id,
-            quantity=r.get("quantity", 1),
-            unit_price=r["unit_price"],
-            discount_pct=r.get("discount_pct", 0),
-            net_amount=r["net_amount"],
-            payment_method=r["payment_method"],
-            crypto_ticker=r.get("crypto_ticker") if pd.notna(r.get("crypto_ticker")) else None,
-            crypto_rate_usd=r.get("crypto_rate_usd") if pd.notna(r.get("crypto_rate_usd")) else None,
-            order_status=r.get("order_status", "completed"),
-            order_timestamp=r["order_timestamp"].to_pydatetime()
-                if hasattr(r["order_timestamp"], "to_pydatetime")
-                else r["order_timestamp"],
-        ))
-        loaded += 1
-
-        # 分批提交
-        if loaded % batch_size == 0:
-            session.commit()
-            print(f"  ... {loaded}/{total} ({loaded*100//total}%)")
-
-    session.commit()
-    print(f"  [OK] fact_orders: 插入 {loaded:,} 条 (共 {total:,} 条)")
-    session.close()
-    return loaded
+            raise FileNotFoundError("orders.csv 不存在，请先运行 transaction_generator")
+        orders_df = pd.read_csv(path, dtype={'source_order_id': 'string'})
+    return load_orders_resumable(orders_df.copy(), get_session, batch_size)
 
 
 def run_full_load():

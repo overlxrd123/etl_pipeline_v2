@@ -1,6 +1,19 @@
 version: 2
 
 models:
+  - name: mart_orders
+    description: "统一订单服务层：已完成且金额为正，保留停用维度的历史订单"
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests: [not_null]
+      - name: product_id
+        tests: [not_null]
+      - name: city_id
+        tests: [not_null]
+      - name: net_amount
+        tests: [not_null]
   - name: mart_sales_daily
     description: "每日销售KPI看板 — 业务核心表，含环比和7日移动平均"
     columns:

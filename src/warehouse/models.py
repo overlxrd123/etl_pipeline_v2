@@ -141,6 +141,7 @@ class DimWeather(Base):
 class DimCrypto(Base):
     """加密汇率维度"""
     __tablename__ = "dim_crypto"
+    __table_args__ = (UniqueConstraint("ticker", "recorded_at", name="uq_crypto_ticker_time"),)
 
     crypto_id    = Column(Integer, primary_key=True, autoincrement=True)
     ticker       = Column(String(10), nullable=False, index=True)   # BTC / ETH
@@ -188,3 +189,24 @@ class FactOrders(Base):
 
     def __repr__(self):
         return f"<FactOrders({self.order_id} ${self.net_amount})>"
+
+
+class EtlOrderKey(Base):
+    """Durable source identity; committed with each order, including legacy CSV imports."""
+    __tablename__ = "etl_order_keys"
+    source_key = Column(String(240), primary_key=True)
+    order_id = Column(Integer, ForeignKey("fact_orders.order_id"), nullable=False, unique=True)
+    fingerprint = Column(String(64), nullable=False)
+
+
+class EtlLoadRun(Base):
+    """Order-load audit trail. A failed run can retain earlier committed batches."""
+    __tablename__ = "etl_load_runs"
+    run_id = Column(String(36), primary_key=True)
+    status = Column(String(20), nullable=False)
+    input_rows = Column(Integer, nullable=False, default=0)
+    inserted_rows = Column(Integer, nullable=False, default=0)
+    skipped_rows = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime)
+    error_type = Column(String(100))

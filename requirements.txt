@@ -10,14 +10,14 @@ httpx>=0.25
 tenacity>=8.2
 
 # dbt
-dbt-core>=1.7
-dbt-sqlite>=1.4
+dbt-core>=1.10,<1.12
+dbt-sqlite>=1.10,<1.11
 
 # Orchestration
-prefect>=2.14
+prefect>=3.8,<4
 
 # Dashboard
-streamlit>=1.28
+streamlit>=1.51,<2
 plotly>=5.17
 
 # Testing

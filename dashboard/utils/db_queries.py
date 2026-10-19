@@ -24,7 +24,7 @@ def get_kpi_summary():
             AVG(net_amount)          AS avg_order_value,
             COUNT(DISTINCT customer_id) AS unique_customers,
             SUM(quantity)            AS total_units
-        FROM fact_orders
+        FROM mart_orders
         WHERE order_status = 'completed'
     """).iloc[0].to_dict()
 
@@ -38,7 +38,7 @@ def get_daily_sales(days: int = 90):
             SUM(f.net_amount)        AS 营收,
             AVG(f.net_amount)        AS 客单价,
             COUNT(DISTINCT f.customer_id) AS 客户数
-        FROM fact_orders f
+        FROM mart_orders f
         JOIN dim_date d ON f.date_id = d.date_id
         WHERE f.order_status = 'completed'
         GROUP BY d.full_date, d.is_weekend
@@ -56,7 +56,7 @@ def get_category_revenue():
             AVG(f.net_amount)  AS 客单价,
             SUM(f.quantity)    AS 销量,
             AVG(f.discount_pct) AS 平均折扣
-        FROM fact_orders f
+        FROM mart_orders f
         JOIN dim_product p ON f.product_id = p.product_id
         WHERE f.order_status = 'completed'
         GROUP BY p.category
@@ -72,7 +72,7 @@ def get_city_revenue():
             SUM(f.net_amount)   AS 营收,
             AVG(f.net_amount)   AS 客单价,
             COUNT(DISTINCT f.customer_id) AS 客户数
-        FROM fact_orders f
+        FROM mart_orders f
         JOIN dim_city ci ON f.city_id = ci.city_id
         WHERE f.order_status = 'completed'
         GROUP BY ci.city_name
@@ -88,7 +88,7 @@ def get_monthly_trend():
             d.month_name       AS 月份名,
             SUM(f.net_amount)  AS 营收,
             COUNT(f.order_id)  AS 订单数
-        FROM fact_orders f
+        FROM mart_orders f
         JOIN dim_date d ON f.date_id = d.date_id
         WHERE f.order_status = 'completed'
         GROUP BY d.year, d.month, d.month_name
@@ -104,7 +104,7 @@ def get_top_products(n: int = 10):
             COUNT(f.order_id)  AS 订单数,
             SUM(f.net_amount)  AS 营收,
             SUM(f.quantity)    AS 销量
-        FROM fact_orders f
+        FROM mart_orders f
         JOIN dim_product p ON f.product_id = p.product_id
         WHERE f.order_status = 'completed'
         GROUP BY p.product_name, p.category
@@ -123,7 +123,7 @@ def get_payment_breakdown():
             END                 AS 支付方式,
             COUNT(*)            AS 数量,
             SUM(net_amount)     AS 营收
-        FROM fact_orders
+        FROM mart_orders
         WHERE order_status = 'completed'
         GROUP BY payment_method
         ORDER BY 数量 DESC
@@ -131,28 +131,14 @@ def get_payment_breakdown():
 
 
 def get_rfm_segments():
+    """Serve the dbt RFM model; recency is anchored to the latest business date."""
     return query_to_df("""
-        WITH customer_rfm AS (
-            SELECT
-                f.customer_id,
-                c.first_name || ' ' || c.last_name AS 客户名,
-                ci.city_name                        AS 城市,
-                c.loyalty_tier                      AS 忠诚度等级,
-                julianday('now') - julianday(MAX(d.full_date)) AS 距上次购买天,
-                COUNT(DISTINCT f.order_id)          AS 购买次数,
-                SUM(f.net_amount)                   AS 消费金额
-            FROM fact_orders f
-            JOIN dim_customer c ON f.customer_id = c.customer_id
-            JOIN dim_date d    ON f.date_id = d.date_id
-            JOIN dim_city ci   ON c.city_id = ci.city_id
-            WHERE f.order_status = 'completed'
-            GROUP BY f.customer_id
-        )
-        SELECT *,
-            5 - NTILE(4) OVER (ORDER BY 距上次购买天 ASC) AS r_score,
-            NTILE(4) OVER (ORDER BY 购买次数 ASC)        AS f_score,
-            NTILE(4) OVER (ORDER BY 消费金额 ASC)        AS m_score
-        FROM customer_rfm
+        SELECT customer_id, customer_name AS 客户名,
+               city_name AS 城市, loyalty_tier AS 忠诚度等级,
+               recency_days AS 距上次购买天,
+               frequency AS 购买次数, monetary AS 消费金额,
+               r_score, f_score, m_score, segment
+        FROM mart_customer_segments
     """)
 
 
@@ -166,6 +152,19 @@ def get_pipeline_stats():
         UNION ALL SELECT 'dim_weather', COUNT(*) FROM dim_weather
         UNION ALL SELECT 'dim_crypto', COUNT(*) FROM dim_crypto
     """)
+
+
+def get_recent_load_runs(limit: int = 20):
+    """An older warehouse has no audit table until its next order load."""
+    from sqlalchemy import inspect
+    if not inspect(engine).has_table('etl_load_runs'):
+        return pd.DataFrame()
+    return query_to_df('''
+        SELECT run_id AS 批次, status AS 状态, input_rows AS 输入行数,
+               inserted_rows AS 新增行数, skipped_rows AS 跳过行数,
+               started_at AS 开始时间, finished_at AS 结束时间, error_type AS 异常类型
+        FROM etl_load_runs ORDER BY started_at DESC LIMIT :limit
+    ''', {'limit': max(1, min(int(limit), 100))})
 
 
 def get_driver_coverage():
@@ -254,7 +253,7 @@ def get_weather_sales_summary():
                 f.city_id,
                 COUNT(*)          AS orders,
                 SUM(f.net_amount) AS revenue
-            FROM fact_orders f
+            FROM mart_orders f
             WHERE f.order_status = 'completed'
             GROUP BY f.date_id, f.city_id
         ),

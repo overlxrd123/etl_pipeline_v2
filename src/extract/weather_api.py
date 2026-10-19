@@ -5,7 +5,7 @@ API文档: https://open-meteo.com/
 """
 import time
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 from config.settings import (
     WEATHER_CITIES, WEATHER_API, WEATHER_ARCHIVE_API, DATA_RAW
@@ -43,7 +43,7 @@ def fetch_weather_for_city(lat: float, lon: float, city_name: str,
         "longitude": lon,
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,"
                  "wind_speed_10m_max,weather_code",
-        "timezone": "America/Chicago",
+        "timezone": "auto",
         "start_date": start_date,
         "end_date": end_date,
     }
@@ -60,6 +60,13 @@ def fetch_weather_for_city(lat: float, lon: float, city_name: str,
     precips  = daily.get("precipitation_sum", [])
     winds    = daily.get("wind_speed_10m_max", [])
     codes    = daily.get("weather_code", [])
+    expected_dates = [(date.fromisoformat(start_date) + timedelta(days=i)).isoformat()
+                      for i in range((date.fromisoformat(end_date) - date.fromisoformat(start_date)).days + 1)]
+    if dates != expected_dates or not all(len(values) == len(dates) for values in
+                                         (temps_max, temps_min, precips, winds, codes)):
+        raise ValueError(f"{city_name}: 天气日期或字段覆盖不完整")
+    if any(value is None for values in (temps_max, temps_min, precips, winds, codes) for value in values):
+        raise ValueError(f"{city_name}: 天气必需字段存在缺失值")
 
     for i, d in enumerate(dates):
         code = int(codes[i]) if i < len(codes) else 0
@@ -83,7 +90,7 @@ def fetch_weather_for_city(lat: float, lon: float, city_name: str,
 
 def fetch_all_cities(days_back: int = 7) -> list[dict]:
     """
-    获取所有5个城市的天气数据。
+    获取所有城市最近 N 个已结束日期的天气，失败或覆盖不完整时抛出异常。
 
     Args:
         days_back: 向前追溯天数（Open-Meteo 免费版支持历史+预报）
@@ -91,22 +98,29 @@ def fetch_all_cities(days_back: int = 7) -> list[dict]:
     Returns:
         所有城市的天气记录列表
     """
-    end = date.today()
-    start = end.replace(day=end.day - days_back) if days_back < end.day else end.replace(month=end.month - 1, day=1)
+    if not isinstance(days_back, int) or days_back < 1:
+        raise ValueError("days_back 必须为正整数")
+    end = date.today() - timedelta(days=1)
+    start = end - timedelta(days=days_back - 1)
     start_str = start.isoformat()
     end_str = end.isoformat()
 
-    all_rows = []
+    all_rows, failures = [], []
     for city_name, (lat, lon) in WEATHER_CITIES.items():
         try:
             print(f"  [*] Fetching {city_name} weather... ({start_str} ~ {end_str})")
             rows = fetch_weather_for_city(lat, lon, city_name, start_str, end_str)
+            if len(rows) != days_back:
+                raise ValueError("返回天气天数不完整")
             all_rows.extend(rows)
             print(f"    [OK] {len(rows)} records")
             time.sleep(0.3)
         except Exception as e:
             print(f"    [FAIL] {city_name}: {e}")
+            failures.append(city_name)
 
+    if failures:
+        raise RuntimeError(f"天气采集不完整，失败城市: {', '.join(failures)}")
     return all_rows
 
 
@@ -123,7 +137,10 @@ def fetch_history_all_cities(start_date, end_date) -> list[dict]:
     start_str = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
     end_str = end_date.isoformat() if hasattr(end_date, "isoformat") else str(end_date)
 
-    all_rows = []
+    expected = (date.fromisoformat(end_str) - date.fromisoformat(start_str)).days + 1
+    if expected < 1:
+        raise ValueError("历史天气开始日期不能晚于结束日期")
+    all_rows, failures = [], []
     for city_name, (lat, lon) in WEATHER_CITIES.items():
         try:
             print(f"  [*] Fetching {city_name} history... ({start_str} ~ {end_str})")
@@ -131,12 +148,17 @@ def fetch_history_all_cities(start_date, end_date) -> list[dict]:
                 lat, lon, city_name, start_str, end_str,
                 api_url=WEATHER_ARCHIVE_API,
             )
+            if len(rows) != expected:
+                raise ValueError("返回天气天数不完整")
             all_rows.extend(rows)
             print(f"    [OK] {len(rows)} records")
             time.sleep(0.3)
         except Exception as e:
             print(f"    [FAIL] {city_name}: {e}")
+            failures.append(city_name)
 
+    if failures:
+        raise RuntimeError(f"历史天气采集不完整，失败城市: {', '.join(failures)}")
     return all_rows
 
 

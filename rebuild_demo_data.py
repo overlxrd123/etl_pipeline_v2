@@ -29,9 +29,9 @@ from config.settings import (
     WEATHER_RAIN_MM, WEATHER_RAIN_FACTOR, WEATHER_STORM_FACTOR,
     WEATHER_HEAT_C, WEATHER_HEAT_FACTOR,
     CRYPTO_RETURN_THRESHOLD, CRYPTO_SHARE_BASE,
-    CRYPTO_SHARE_UP, CRYPTO_SHARE_DOWN,
+    CRYPTO_SHARE_UP, CRYPTO_SHARE_DOWN, WEATHER_CITIES,
 )
-from src.warehouse.models import FactOrders, DimWeather, DimCrypto
+from src.warehouse.models import FactOrders, DimWeather, DimCrypto, EtlOrderKey
 from src.extract.weather_api import fetch_history_all_cities
 from src.extract.crypto_api import fetch_crypto_history
 from src.extract.transaction_generator import generate_orders
@@ -49,7 +49,9 @@ def backup_database():
         return
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     target = DB_PATH.with_name(f"{DB_PATH.name}.bak_{stamp}")
-    shutil.copy2(DB_PATH, target)
+    import sqlite3
+    with sqlite3.connect(DB_PATH) as source, sqlite3.connect(target) as destination:
+        source.backup(destination)
     print(f"  [OK] 数据库已备份: {target.name}")
 
 
@@ -88,6 +90,9 @@ def get_history(refresh: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
 def clear_demo_tables():
     session = get_session()
     try:
+        from sqlalchemy import inspect
+        if inspect(session.get_bind()).has_table(EtlOrderKey.__tablename__):
+            session.query(EtlOrderKey).delete()
         for model in (FactOrders, DimWeather, DimCrypto):
             deleted = session.query(model).delete()
             print(f"  [CLEAR] {model.__tablename__}: 删除 {deleted:,} 行")
@@ -158,6 +163,11 @@ def main():
     if not args.no_backup:
         backup_database()
     weather_df, crypto_df = get_history(args.refresh)
+    from src.load.driver_validation import validate_history
+    validate_history(weather_df, crypto_df, SIM_START, SIM_END, WEATHER_CITIES)
+    for filename in ('products.csv', 'customers.csv'):
+        if not (DATA_PROCESSED / filename).exists():
+            raise FileNotFoundError(f'重建前缺少 {filename}，保留原仓库，请先准备产品/客户文件')
 
     print("\n[2/4] 清空订单与历史维度表")
     clear_demo_tables()

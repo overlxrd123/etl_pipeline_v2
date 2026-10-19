@@ -17,7 +17,7 @@ models:
         description: "订单状态（只保留 completed）"
 
   - name: stg_products
-    description: "活跃产品维度，含利润率和供应商信息"
+    description: "产品维度（保留停用产品的历史记录），含利润率和供应商信息"
     columns:
       - name: product_id
         tests:
@@ -28,7 +28,7 @@ models:
           - not_null
 
   - name: stg_customers
-    description: "活跃客户维度，含城市和忠诚度等级"
+    description: "客户维度（保留停用客户的历史记录），含城市和忠诚度等级"
     columns:
       - name: customer_id
         tests:

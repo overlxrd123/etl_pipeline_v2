@@ -30,6 +30,17 @@ for i, row in stats.iterrows():
 st.divider()
 
 # 数据质量检查
+st.subheader("订单加载批次")
+from dashboard.utils.db_queries import get_recent_load_runs
+load_runs = get_recent_load_runs()
+if load_runs.empty:
+    st.info("暂无加载记录。下次运行订单加载后，这里会显示批次状态、增量行数及失败类型。")
+else:
+    st.dataframe(load_runs, width='stretch', hide_index=True)
+    if load_runs.iloc[0]['状态'] == 'failed':
+        st.warning("最近一次订单加载失败。已提交批次保留，使用同一来源文件重跑可补齐未完成部分。")
+st.divider()
+
 st.subheader("数据质量检查")
 
 from config.db_connection import get_session
@@ -160,11 +171,13 @@ else:
 
 st.info("""
 **数据刷新方式（当前为手动触发，未配置定时任务）：**
-- 天气：`python -m orchestration.flows.ingest_weather`（最近 7 天预报）
+- 天气：`python -m orchestration.flows.ingest_weather`（最近 7 个已结束日期，按城市当地时区）
 - 币价：`python -m orchestration.flows.ingest_crypto`（当前现货价）
 - 历史演示数据：`python rebuild_demo_data.py`（365 天窗口，重生成订单）
 - 顺便导出 Power BI：`python rebuild_demo_data.py --pbi`
 - dbt 转换：`cd dbt_project && dbt run --profiles-dir .`
+- 完整流程：`python -m orchestration.flows.run_full_pipeline`（默认采集模拟窗口内的历史数据并执行 dbt build）
+- 离线流程：`python -m orchestration.flows.run_full_pipeline --offline`（使用已有驱动数据，仍执行质量门禁和 dbt build）
 
 > 单独抓取新天气/币价只会追加维度数据；要让它们影响订单和看板，
 > 需要重建订单（或调整 `config/settings.py` 的 `SIM_START` / `SIM_END` 后重建）。

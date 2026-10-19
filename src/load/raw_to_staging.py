@@ -84,75 +84,15 @@ def load_customers(customers_df: pd.DataFrame = None):
 
 
 def load_weather(weather_records: list[dict] = None):
-    """加载天气维度表（upsert 模式：city_id + date_id 唯一）"""
-    session = get_session()
-
-    if weather_records is None:
-        print("  [SKIP] 无天气数据（需先调用 weather_api）")
-        session.close()
-        return
-
-    cities = {c.city_name: c.city_id for c in session.query(DimCity).all()}
-    inserted, skipped = 0, 0
-
-    for r in weather_records:
-        city_id = cities.get(r.get("city_name"))
-        if not city_id:
-            continue
-
-        date_str = r.get("date", "")
-        date_id = int(date_str.replace("-", "")) if date_str else 0
-
-        # Upsert: 检查是否已存在
-        existing = session.query(DimWeather).filter_by(
-            city_id=city_id, date_id=date_id).first()
-        if existing:
-            skipped += 1
-            continue
-
-        session.add(DimWeather(
-            city_id=city_id,
-            date_id=date_id,
-            temp_max_c=r.get("temp_max_c"),
-            temp_min_c=r.get("temp_min_c"),
-            temp_avg_c=r.get("temp_avg_c"),
-            precipitation_mm=r.get("precipitation_mm"),
-            wind_speed_kmh=r.get("wind_speed_kmh"),
-            weather_code=r.get("weather_code"),
-            weather_desc=r.get("weather_desc"),
-            fetched_at=datetime.now(),
-        ))
-        inserted += 1
-
-    session.commit()
-    print(f"  [OK] dim_weather: 插入 {inserted} 条, 跳过 {skipped} 条（已存在）")
-    session.close()
-    return inserted
+    """Insert or update weather by city/date, as one transaction."""
+    from src.load.driver_loader import load_weather_records
+    return load_weather_records(weather_records, get_session)
 
 
 def load_crypto(crypto_records: list[dict] = None):
-    """加载加密汇率维度表（追加模式）"""
-    session = get_session()
-
-    if crypto_records is None:
-        print("  [SKIP] 无加密数据（需先调用 crypto_api）")
-        session.close()
-        return
-
-    count = 0
-    for r in crypto_records:
-        session.add(DimCrypto(
-            ticker=r["ticker"],
-            price_usd=r["price_usd"],
-            recorded_at=r["recorded_at"],
-            fetched_at=r.get("fetched_at", datetime.now()),
-        ))
-        count += 1
-
-    session.commit()
-    print(f"  [OK] dim_crypto: 插入 {count} 条")
-    session.close()
-    return count
+    """Insert or update snapshots by ticker/timestamp."""
+    from src.load.driver_loader import load_crypto_records
+    return load_crypto_records(crypto_records, get_session)
 
 
 if __name__ == "__main__":

@@ -13,4 +13,4 @@ SELECT
     sku,
     is_active
 FROM dim_product
-WHERE is_active = 1
+-- Retain inactive products so historical sales remain in downstream metrics.

@@ -29,7 +29,8 @@ def check_unique(df: pd.DataFrame, column: str) -> dict:
 
 def check_positive(df: pd.DataFrame, column: str) -> dict:
     """检查数值列是否全为正"""
-    neg_count = (df[column] <= 0).sum()
+    import numpy as np
+    neg_count = ((df[column] <= 0) | ~np.isfinite(df[column])).sum()
     return {
         "check": "positive",
         "column": column,
@@ -40,7 +41,8 @@ def check_positive(df: pd.DataFrame, column: str) -> dict:
 
 def check_range(df: pd.DataFrame, column: str, lo: float, hi: float) -> dict:
     """检查数值列是否在范围内"""
-    out_of_range = ((df[column] < lo) | (df[column] > hi)).sum()
+    import numpy as np
+    out_of_range = ((df[column] < lo) | (df[column] > hi) | ~np.isfinite(df[column])).sum()
     return {
         "check": "range",
         "column": column,

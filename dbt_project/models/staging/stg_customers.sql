@@ -13,4 +13,4 @@ SELECT
     c.is_active
 FROM dim_customer c
 LEFT JOIN dim_city ci ON c.city_id = ci.city_id
-WHERE c.is_active = 1
+-- Retain inactive customers so their historical orders are not discarded.

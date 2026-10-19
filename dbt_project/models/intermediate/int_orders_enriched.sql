@@ -33,6 +33,7 @@ SELECT
     d.week_of_year,
 
     o.city_id,
+    ci.city_name AS order_city,
     o.quantity,
     o.unit_price AS sold_price,
     o.discount_pct,
@@ -42,9 +43,11 @@ SELECT
     o.payment_method,
     o.crypto_ticker,
     o.crypto_rate_usd,
+    o.order_status,
     o.order_timestamp
 
 FROM {{ ref('stg_orders') }} o
 JOIN {{ ref('stg_customers') }} c ON o.customer_id = c.customer_id
 JOIN {{ ref('stg_products') }} p  ON o.product_id  = p.product_id
 JOIN dim_date d                   ON o.date_id     = d.date_id
+JOIN dim_city ci                  ON o.city_id     = ci.city_id

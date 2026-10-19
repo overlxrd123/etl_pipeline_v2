@@ -93,6 +93,12 @@ def fetch_crypto_prices(tickers: list[str] | None = None,
             rows = fetcher(tickers, timeout)
             if not rows:
                 raise ValueError("返回数据为空")
+            import math
+            expected = {TICKER_LABELS.get(t, t.upper()) for t in tickers}
+            if {r['ticker'] for r in rows} != expected or len(rows) != len(expected):
+                raise ValueError("行情源未完整返回所需币种")
+            if any(not math.isfinite(float(r['price_usd'])) or float(r['price_usd']) <= 0 for r in rows):
+                raise ValueError("行情源价格无效")
             now = datetime.now(timezone.utc)
             for r in rows:
                 r["recorded_at"] = now
@@ -126,6 +132,8 @@ def fetch_crypto_history(start_date, end_date,
 
     start = _as_date(start_date)
     end = _as_date(end_date)
+    if start > end or (end - start).days >= 1000:
+        raise ValueError("币价历史窗口必须为 1–1000 天；更长窗口请分段采集")
     start_ms = int(datetime(start.year, start.month, start.day,
                             tzinfo=timezone.utc).timestamp() * 1000)
     end_ms = int(datetime(end.year, end.month, end.day,
@@ -158,6 +166,15 @@ def fetch_crypto_history(start_date, end_date,
             })
         print(f"  [OK] {t.upper()} 历史日线: {len(resp.json())} 条")
 
+    import math
+    expected = {(TICKER_LABELS.get(t, t.upper()), (start + timedelta(days=i)).isoformat())
+                for t in tickers for i in range((end - start).days + 1)}
+    results = [r for r in results if (r['ticker'], r['recorded_at'].date().isoformat()) in expected]
+    actual = {(r['ticker'], r['recorded_at'].date().isoformat()) for r in results}
+    if actual != expected or len(results) != len(expected):
+        raise ValueError("历史币价缺失或重复，拒绝使用不完整行情")
+    if any(not math.isfinite(r['price_usd']) or r['price_usd'] <= 0 for r in results):
+        raise ValueError("历史币价无效")
     return results
 
 

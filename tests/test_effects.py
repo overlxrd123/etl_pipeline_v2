@@ -3,6 +3,7 @@
 运行：python -m pytest -q
 """
 import sqlite3
+import os
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,7 @@ from config.settings import (
 from src.extract.transaction_generator import _payment_method, _weather_multiplier
 
 ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = ROOT / "warehouse.db"
+DB_PATH = Path(os.getenv('ETL_TEST_WAREHOUSE', str(ROOT / 'warehouse.db')))
 
 
 def _weather(code: int, precip: float, temp_max: float) -> dict:

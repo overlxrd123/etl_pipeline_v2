@@ -42,14 +42,27 @@ def task_gen_customers(force: bool = False):
 
 
 @task(name="gen-orders")
-def task_gen_orders(products_df, customers_df):
+def task_gen_orders(products_df, customers_df, force: bool = False):
     """生成订单"""
     import pandas as pd
     from datetime import date
     from config.settings import DATA_PROCESSED, SIM_START, SIM_END
+    DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
+    path = DATA_PROCESSED / "orders.csv"
+    if path.exists() and not force:
+        cached = pd.read_csv(path, dtype={'source_order_id': 'string'})
+        expected = (int(SIM_START.replace('-', '')), int(SIM_END.replace('-', '')))
+        if (int(cached.date_id.min()), int(cached.date_id.max())) != expected:
+            raise ValueError("缓存订单窗口与配置不一致，请使用 rebuild_demo_data.py 显式重建")
+        return cached
 
     # 读取真实天气/币价作为订单生成输入
     weather_df, crypto_df = load_drivers_from_db()
+    from src.load.driver_validation import validate_history
+    from config.settings import WEATHER_CITIES
+    if weather_df is None or crypto_df is None:
+        raise ValueError('历史天气或币价为空，禁止退化为无效应订单')
+    validate_history(weather_df, crypto_df, SIM_START, SIM_END, WEATHER_CITIES)
 
     # 固定使用配置中的模拟窗口，避免驱动数据只有几天时
     # 订单窗口也跟着缩成几天
@@ -83,9 +96,17 @@ def generate_orders_flow(force: bool = False):
     print("=" * 50)
     print("[Flow: generate-orders] 开始")
 
+    from config.db_connection import get_session
+    from config.settings import DATA_PROCESSED
+    from src.warehouse.models import FactOrders
+    DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
+    with get_session() as session:
+        has_orders = session.query(FactOrders.order_id).first() is not None
+    if has_orders and (force or not (DATA_PROCESSED / "orders.csv").exists()):
+        raise ValueError("已有订单时禁止隐式重新生成；请恢复原 CSV 或使用 rebuild_demo_data.py 显式重建")
     products_df = task_gen_products(force)
     customers_df = task_gen_customers(force)
-    orders_df = task_gen_orders(products_df, customers_df)
+    orders_df = task_gen_orders(products_df, customers_df, force)
 
     task_load_dimensions(products_df, customers_df)
     loaded = task_load_fact(orders_df)
@@ -95,4 +116,4 @@ def generate_orders_flow(force: bool = False):
 
 
 if __name__ == "__main__":
-    generate_orders_flow(force=True)
+    generate_orders_flow()

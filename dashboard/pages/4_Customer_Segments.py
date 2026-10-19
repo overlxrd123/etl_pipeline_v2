@@ -20,21 +20,10 @@ if rfm.empty:
 else:
     rfm["rfm总分"] = rfm["r_score"] + rfm["f_score"] + rfm["m_score"]
 
-    def classify(row):
-        r, f, m = row["r_score"], row["f_score"], row["m_score"]
-        if r == 4 and f == 4 and m == 4:
-            return "核心客户"
-        if r >= 3 and f >= 3 and m >= 3:
-            return "忠诚客户"
-        if r >= 3 and (f + m) >= 4:
-            return "潜力客户"
-        if r <= 2 and f >= 3 and m >= 3:
-            return "流失风险"
-        if r <= 2 and f <= 2 and m <= 2:
-            return "已流失"
-        return "需关注"
-
-    rfm["分层"] = rfm.apply(classify, axis=1)
+    rfm["分层"] = rfm["segment"].map({
+        'Champions': '核心客户', 'Loyal': '忠诚客户', 'Potential': '潜力客户',
+        'At Risk': '流失风险', 'Lost': '已流失', 'Needs Attention': '需关注',
+    }).fillna('需关注')
 
     c1, c2 = st.columns(2)
 

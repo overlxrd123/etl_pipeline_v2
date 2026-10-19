@@ -1,6 +1,6 @@
 """
 Prefect 父 Flow: 完整 ETL 管道编排
-天气采集 → 加密采集 → 订单生成 → dbt 转换 → 数据质量检查
+天气采集 → 加密采集 → 订单生成 → 数据质量门禁 → dbt 构建与测试
 """
 import sys
 from pathlib import Path
@@ -22,27 +22,24 @@ def task_run_dbt():
 
     # --profiles-dir . 不能省略：profile 在 dbt_project/ 里，
     # 默认位置 ~/.dbt/profiles.yml 不存在
-    print("[dbt] 运行 dbt run...")
+    import os
+    from sqlalchemy.engine import make_url
+    from config.settings import DB_URL
+    url = make_url(DB_URL)
+    if url.get_backend_name() != 'sqlite':
+        raise ValueError('当前 dbt profile 仅支持 SQLite；其他数据库需要单独适配并验证 SQL')
+    environment = os.environ.copy()
+    environment['ETL_SQLITE_PATH'] = str(Path(url.database).resolve())
+    print("[dbt] 运行 dbt build（模型与测试按依赖顺序执行）...")
     result = subprocess.run(
-        ["dbt", "run", "--profiles-dir", "."],
+        ["dbt", "build", "--profiles-dir", "."],
         cwd=str(dbt_dir),
         capture_output=True,
-        text=True,
+        text=True, encoding='utf-8', errors='replace', timeout=600, env=environment,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"dbt run 失败:\n{result.stderr[:1000]}")
-    print("[dbt] run 完成")
-
-    print("[dbt] 运行 dbt test...")
-    result = subprocess.run(
-        ["dbt", "test", "--profiles-dir", "."],
-        cwd=str(dbt_dir),
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"dbt test 失败:\n{result.stderr[:1000]}")
-    print("[dbt] test 完成")
+        raise RuntimeError(f"dbt build 失败:\n{(result.stdout + result.stderr)[-4000:]}")
+    print("[dbt] build 完成")
 
     return True
 
@@ -51,30 +48,8 @@ def task_run_dbt():
 def task_quality_check():
     """数据质量快速检查"""
     from config.db_connection import get_session
-    from src.warehouse.models import FactOrders, DimProduct, DimCustomer
-
-    session = get_session()
-
-    checks = {}
-    checks["fact_orders_count"] = session.query(FactOrders).count()
-    checks["dim_product_count"] = session.query(DimProduct).count()
-    checks["dim_customer_count"] = session.query(DimCustomer).count()
-
-    # 检查空值
-    null_orders = session.query(FactOrders).filter(FactOrders.net_amount.is_(None)).count()
-    checks["null_net_amount"] = null_orders
-
-    session.close()
-
-    print(f"[Quality] 数据质量检查:")
-    for k, v in checks.items():
-        print(f"  {k}: {v}")
-
-    # 如果存在明显问题则告警
-    if null_orders > 0:
-        print(f"[Quality] WARNING: {null_orders} 条订单金额为空!")
-
-    return checks
+    from src.utils.quality import check_warehouse
+    return check_warehouse(get_session)
 
 
 @flow(name="full-etl-pipeline")
@@ -92,6 +67,12 @@ def run_full_pipeline(skip_api: bool = False, skip_dbt: bool = False):
     print("=" * 60)
 
     stages = []
+    from config.db_connection import init_db
+    from seed_data import seed_dim_date, seed_dim_city
+    from config.settings import SIM_START, SIM_END
+    init_db()
+    seed_dim_date()
+    seed_dim_city()
 
     # Stage 1: 数据采集
     if not skip_api:
@@ -100,11 +81,11 @@ def run_full_pipeline(skip_api: bool = False, skip_dbt: bool = False):
         print("=" * 40)
 
         print("\n[1a] 天气数据...")
-        weather_count = ingest_weather()
+        weather_count = ingest_weather(start_date=SIM_START, end_date=SIM_END)
         stages.append(("天气采集", weather_count))
 
         print("\n[1b] 加密汇率...")
-        crypto_count = ingest_crypto()
+        crypto_count = ingest_crypto(start_date=SIM_START, end_date=SIM_END)
         stages.append(("加密采集", crypto_count))
     else:
         print("\n[STAGE 1/4] 数据采集 — 跳过（离线模式）")
@@ -115,23 +96,20 @@ def run_full_pipeline(skip_api: bool = False, skip_dbt: bool = False):
     print("=" * 40)
     order_count = generate_orders_flow(force=False)
     stages.append(("订单加载", order_count))
+    # Reject bad source data before refreshing any dbt marts.
+    print("\nSTAGE 3/4: 入库质量门禁")
+    quality = task_quality_check()
+    stages.append(("质量检查", quality))
 
-    # Stage 3: dbt 转换
+    # Stage 4: dbt 转换与测试
     print("\n" + "=" * 40)
-    print("STAGE 3/4: dbt 数据转换")
+    print("STAGE 4/4: dbt 数据转换与测试")
     print("=" * 40)
     if not skip_dbt:
         dbt_ok = task_run_dbt()
         stages.append(("dbt转换", dbt_ok))
     else:
         print("  dbt 转换 — 跳过（需安装 dbt-sqlite）")
-
-    # Stage 4: 质量检查
-    print("\n" + "=" * 40)
-    print("STAGE 4/4: 数据质量检查")
-    print("=" * 40)
-    quality = task_quality_check()
-    stages.append(("质量检查", quality))
 
     # 完成
     elapsed = (datetime.now() - start).total_seconds()
@@ -146,4 +124,9 @@ def run_full_pipeline(skip_api: bool = False, skip_dbt: bool = False):
 
 
 if __name__ == "__main__":
-    run_full_pipeline(skip_api=True, skip_dbt=True)
+    import argparse
+    parser = argparse.ArgumentParser(description='运行完整 ETL；默认采集历史驱动数据并执行 dbt build')
+    parser.add_argument('--offline', action='store_true', help='使用已有驱动数据，不调用外部 API')
+    parser.add_argument('--skip-dbt', action='store_true', help='显式跳过 dbt，marts 不会刷新')
+    args = parser.parse_args()
+    run_full_pipeline(skip_api=args.offline, skip_dbt=args.skip_dbt)

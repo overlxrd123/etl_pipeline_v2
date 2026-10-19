@@ -11,7 +11,7 @@ SELECT
     day_name,
     is_weekend,
     city_id,
-    customer_city AS city_name,
+    order_city AS city_name,
     category,
     COUNT(DISTINCT order_id)  AS order_count,
     COUNT(DISTINCT customer_id) AS unique_customers,
@@ -24,4 +24,4 @@ FROM {{ ref('int_orders_enriched') }}
 GROUP BY
     date_id, full_date, year, quarter, month, month_name,
     day_of_week, day_name, is_weekend,
-    city_id, customer_city, category
+    city_id, order_city, category
